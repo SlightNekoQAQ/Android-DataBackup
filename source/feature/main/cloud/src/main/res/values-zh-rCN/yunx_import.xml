@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="yunx_import_accounts">从云析导入网盘账号</string>
+    <string name="yunx_import_replace">导入将替换此前导入的云析账号，不影响其他云端账号设置。</string>
+    <string name="yunx_export_password">云析导出口令（明文导出留空）</string>
+    <string name="yunx_import_failed">无法读取网盘账号，请检查导出文件和口令。</string>
+    <string name="yunx_import_confirm">导入</string>
+</resources>

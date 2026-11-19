@@ -13,6 +13,7 @@ import javax.crypto.spec.SecretKeySpec
 class ImportedCloudAccount internal constructor(val platform: String, val nickname: String, fields: Map<String, String>) {
     private val credentials = fields.toMap()
     fun credential(name: String): String? = credentials[name]
+    internal fun credentialFields(): Map<String, String> = credentials.toMap()
     override fun toString(): String = "ImportedCloudAccount(platform=$platform)"
 }
 

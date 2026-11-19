@@ -18,7 +18,8 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:util"))
 
-    // Compose Navigation
+    // Compose Navigation and system document picker
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.hilt.navigation.compose)
 

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="yunx_import_accounts">Import YunX accounts</string>
+    <string name="yunx_import_replace">Importing replaces previously imported YunX accounts. Other cloud account settings will not change.</string>
+    <string name="yunx_export_password">YunX export password (blank for plaintext)</string>
+    <string name="yunx_import_failed">Could not read cloud accounts. Check the export file and password.</string>
+    <string name="yunx_import_confirm">Import</string>
+</resources>
