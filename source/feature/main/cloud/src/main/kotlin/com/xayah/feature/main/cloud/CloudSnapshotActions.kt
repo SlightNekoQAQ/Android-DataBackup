@@ -25,10 +25,14 @@ import androidx.compose.ui.unit.dp
 import com.xayah.core.data.cloudpool.CloudBackupRepository
 import com.xayah.core.ui.component.Clickable
 import com.xayah.core.ui.component.Title
+import com.xayah.core.datastore.saveBackupSavePath
+import com.xayah.core.ui.route.MainRoutes
+import com.xayah.core.ui.util.LocalNavController
+import com.xayah.core.util.encodeURL
+import com.xayah.core.util.encodedURLWithSpace
 import com.xayah.core.util.localBackupSaveDir
+import com.xayah.core.util.navigateSingle
 import java.io.File
-import java.io.IOException
-import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -40,6 +44,7 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun CloudSnapshotActions() {
     val context = LocalContext.current.applicationContext
+    val navController = checkNotNull(LocalNavController.current)
     val repository = remember(context) { CloudBackupRepository(context) }
     val scope = rememberCoroutineScope()
     val progressUpdates = remember { MutableStateFlow<Pair<Int, Int>?>(null) }
@@ -50,6 +55,7 @@ internal fun CloudSnapshotActions() {
     var message by remember { mutableStateOf("") }
     var candidates by remember { mutableStateOf<List<CloudBackupRepository.RemoteBackup>?>(null) }
     var selected by remember { mutableStateOf<CloudBackupRepository.RemoteBackup?>(null) }
+    var verifiedFolder by remember { mutableStateOf<File?>(null) }
     val failed = stringResource(R.string.yunx_job_failed)
     val empty = stringResource(R.string.yunx_no_backups)
     val complete = stringResource(R.string.yunx_upload_complete)
@@ -59,6 +65,7 @@ internal fun CloudSnapshotActions() {
         Clickable(enabled = !busy, icon = Icons.Outlined.Cloud, title = stringResource(R.string.yunx_upload_local),
             desc = stringResource(R.string.yunx_upload_local_desc)) {
             message = ""
+            verifiedFolder = null
             mode = 0
         }
         Clickable(enabled = !busy, icon = Icons.Outlined.Cloud, title = stringResource(R.string.yunx_download_snapshot)) {
@@ -75,6 +82,22 @@ internal fun CloudSnapshotActions() {
                 } finally { busy = false }
             }
         }
+        verifiedFolder?.let { folder ->
+            Clickable(enabled = !busy, title = stringResource(R.string.yunx_open_restore),
+                desc = stringResource(R.string.yunx_open_restore_desc)) {
+                busy = true
+                scope.launch {
+                    try {
+                        context.saveBackupSavePath(folder.path)
+                        navController.navigateSingle(MainRoutes.Reload.getRoute(encodedURLWithSpace, folder.path.encodeURL()))
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        message = failed
+                    } finally { busy = false }
+                }
+            }
+        }
         if (busy || message.isNotBlank()) Clickable(
             readOnly = true,
             title = if (busy) progress?.let { (done, total) -> stringResource(R.string.yunx_job_progress, done, total) }
@@ -86,7 +109,7 @@ internal fun CloudSnapshotActions() {
             title = { Text(stringResource(R.string.yunx_download_snapshot)) },
             text = { LazyColumn(Modifier.heightIn(max = 360.dp)) {
                 items(options) { backup ->
-                    TextButton(onClick = { selected = backup; candidates = null; mode = 1 }) {
+                    TextButton(onClick = { selected = backup; verifiedFolder = null; candidates = null; mode = 1 }) {
                         Text("${providerName(backup.provider)} · ${backup.label}")
                     }
                 }
@@ -119,20 +142,8 @@ internal fun CloudSnapshotActions() {
                             val result = repository.publish(localRoot, passphrase) { done, total -> progressUpdates.value = done to total }
                             if (result.missingCopies.isEmpty()) complete else incomplete
                         } else {
-                            val staging = repository.restore(checkNotNull(backup), passphrase) { done, total -> progressUpdates.value = done to total }
-                            val dest = withContext(Dispatchers.IO) {
-                                // Keep the existing local repository intact. Import via DataBackup's folder picker.
-                                val output = File(localRoot, "cloud-restore-${UUID.randomUUID()}")
-                                check(output.mkdir())
-                                try {
-                                    if (!staging.copyRecursively(output, overwrite = false)) throw IOException("Could not export verified backup")
-                                    output
-                                } catch (error: Exception) {
-                                    output.deleteRecursively()
-                                    throw error
-                                } finally { staging.deleteRecursively() }
-                            }
-                            "$restored\n${dest.path}"
+                            verifiedFolder = repository.restore(checkNotNull(backup), passphrase) { done, total -> progressUpdates.value = done to total }
+                            restored
                         }
                     } catch (error: CancellationException) {
                         throw error

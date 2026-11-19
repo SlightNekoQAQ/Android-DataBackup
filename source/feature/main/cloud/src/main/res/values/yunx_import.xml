@@ -20,7 +20,9 @@
     <string name="yunx_no_backups">No backup manifests found in the selected folders.</string>
     <string name="yunx_upload_complete">Backup uploaded.</string>
     <string name="yunx_manifest_partial">Backup uploaded, but some recovery index copies could not be saved.</string>
-    <string name="yunx_restore_path">Files verified. Select this folder as the local backup directory and reload backups before restoring:</string>
+    <string name="yunx_restore_path">Cloud files verified and ready for restore.</string>
+    <string name="yunx_open_restore">Open in DataBackup restore</string>
+    <string name="yunx_open_restore_desc">Switch the active local backup directory to the downloaded snapshot and open the reload screen. Your previous backup files will not be removed.</string>
     <string name="yunx_job_running">Working… Keep this screen open.</string>
     <string name="yunx_speed_test">Test download speed</string>
     <string name="yunx_speed_failed">Test failed: use a 1–16 MiB file</string>
