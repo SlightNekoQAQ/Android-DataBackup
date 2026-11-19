@@ -151,7 +151,7 @@ class CloudPoolTest {
         val configArchive = CloudArchive(metadata.archive, "account", "config", 10, "b".repeat(64), "verified-account")
         val encoded = CloudManifest.encode(listOf(entry, configArchive), listOf(metadata))
         assertEquals(listOf(entry, configArchive), CloudManifest.decode(encoded))
-        assertEquals(listOf(metadata), CloudManifest.decodeContents(encoded).entries
+        assertEquals(listOf(metadata), CloudManifest.decodeContents(encoded).entries)
         assertTrue(String(encoded, Charsets.UTF_8).contains("verified-account"))
         // The index is plain JSON on purpose: recovery must not require a user-supplied secret.
         assertTrue(String(encoded, Charsets.UTF_8).contains("databackup-cloud-index"))
