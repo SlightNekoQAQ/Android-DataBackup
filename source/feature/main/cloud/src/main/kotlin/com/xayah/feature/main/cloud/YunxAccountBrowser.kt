@@ -47,6 +47,7 @@ internal fun providerName(platform: String): String = when (platform) {
 internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val drive = remember(account, context) { account.personalDrive(context.applicationContext) }
+    val preferences = remember(context) { CloudDestinationPreferences(context.applicationContext) }
     val folder = remember(slot, account) { preferences.defaultFolder(slot) } ?: return
     var parents by remember(account, folder) { mutableStateOf(listOf(folder)) }
     var files by remember { mutableStateOf<List<ShareFile>>(emptyList()) }
@@ -55,7 +56,6 @@ internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, onDism
     var saving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val repository = remember(context) { CloudBackupRepository(context) }
-    val preferences = remember(context) { CloudDestinationPreferences(context.applicationContext) }
     var connections by remember(slot) { mutableStateOf(preferences.connections(slot)) }
     var speed by remember { mutableStateOf<Long?>(null) }
     var speedFailed by remember { mutableStateOf(false) }
