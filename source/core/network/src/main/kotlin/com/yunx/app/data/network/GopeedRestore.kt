@@ -85,7 +85,7 @@ class GopeedRestore(context: Context) {
             }
             val temp = File(root, "gopeed-tmp").apply { mkdirs() }
             // Credentials can appear in request metadata; do not persist a Bolt task database.
-            val config = JSONObject().put("storage", "memory").put("tempDir", temp.path + File.separator)
+            val config = JSONObject().put("storage", "mem").put("tempDir", temp.path + File.separator)
                 .put("apiEnable", false).put("refreshInterval", 500)
                 .put("downloadConfig", JSONObject().put("downloadDir", temp.path).put("maxRunning", 3))
             Libgopeed.start(config.toString())
