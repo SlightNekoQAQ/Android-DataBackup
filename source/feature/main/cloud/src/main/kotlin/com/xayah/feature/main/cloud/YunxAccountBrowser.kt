@@ -1,6 +1,9 @@
 package com.xayah.feature.main.cloud
 
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -20,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xayah.core.data.cloudpool.ImportedCloudAccount
 import com.xayah.core.data.cloudpool.CloudBackupRepository
+import com.xayah.core.data.cloudpool.CloudDestinationPreferences
 import com.yunx.app.data.network.model.ShareFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +54,8 @@ internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, config
     var saving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val repository = remember(context) { CloudBackupRepository(context) }
+    val preferences = remember(context) { CloudDestinationPreferences(context.applicationContext) }
+    var connections by remember(slot) { mutableStateOf(preferences.connections(slot)) }
     var speed by remember { mutableStateOf<Long?>(null) }
     var speedFailed by remember { mutableStateOf(false) }
     LaunchedEffect(drive, parents) {
@@ -70,7 +76,28 @@ internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, config
         onDismissRequest = onDismiss,
         title = { Text(providerName(account.platform)) },
         text = {
-            when {
+            Column {
+                if (parents.size == 1 && configured) {
+                    Text(stringResource(R.string.yunx_connections, connections))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(1, 4, 8, 16, 32).forEach { count ->
+                            TextButton(enabled = !saving && count != connections, onClick = {
+                                saving = true
+                                scope.launch {
+                                    try {
+                                        withContext(Dispatchers.IO) { preferences.setConnections(slot, count) }
+                                        connections = count
+                                        speed = null
+                                        speedFailed = false
+                                    } catch (error: CancellationException) { throw error }
+                                    catch (_: Exception) { speedFailed = true }
+                                    finally { saving = false }
+                                }
+                            }) { Text(count.toString()) }
+                        }
+                    }
+                }
+                when {
                 loading -> CircularProgressIndicator()
                 failed -> Text(stringResource(R.string.yunx_browse_failed))
                 files.isEmpty() -> Text(stringResource(R.string.yunx_empty_folder))
@@ -82,6 +109,7 @@ internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, config
                             Text(file.fname)
                         }
                     }
+                }
                 }
             }
         },

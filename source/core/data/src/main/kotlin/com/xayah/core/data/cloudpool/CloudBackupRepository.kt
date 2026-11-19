@@ -4,6 +4,7 @@ import android.content.Context
 import com.yunx.app.data.network.model.ShareFile
 import java.io.File
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -59,11 +60,23 @@ class CloudBackupRepository(context: Context) {
     }
 
     suspend fun available(): List<RemoteBackup> = withContext(Dispatchers.IO) {
-        configured().flatMap { account ->
-            account.account.personalDrive(context).list(account.folder)
-                .filter { it.isManifest() && it.fsize in 1..MAX_MANIFEST }
-                .map { RemoteBackup(it.fname, account.account.platform, account.key, it.fid) }
+        val accounts = configured()
+        val backups = mutableListOf<RemoteBackup>()
+        var successfulListings = 0
+        for (account in accounts) {
+            try {
+                val entries = account.account.personalDrive(context).list(account.folder)
+                backups += entries.filter { it.isManifest() && it.fsize in 1..MAX_MANIFEST }
+                    .map { RemoteBackup(it.fname, account.account.platform, account.key, it.fid) }
+                successfulListings++
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // One failed account must not hide manifests from all other accounts.
+            }
         }
+        if (accounts.isNotEmpty() && successfulListings == 0) throw IOException("Cannot list any configured backup folder")
+        backups
     }
 
     suspend fun restore(backup: RemoteBackup, password: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
@@ -96,7 +109,8 @@ class CloudBackupRepository(context: Context) {
             } else if (current.isFile) {
                 val path = current.relativeTo(root).invariantSeparatorsPath
                 validateRelativePath(path)
-                result += CloudSnapshot.Source(path, current)
+                // The original app includes protocol passwords in configurations.json.
+                if (path != "configs/configurations.json") result += CloudSnapshot.Source(path, current)
             }
         }
         return result.sortedBy { it.relativePath }

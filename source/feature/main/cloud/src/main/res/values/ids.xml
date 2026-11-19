@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
     <item name="processing" type="string"/>
     <item name="connection_established" type="string"/>
     <item name="test_connection" type="string"/>

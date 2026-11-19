@@ -10,6 +10,13 @@ class CloudDestinationPreferences(context: Context) {
 
     fun connections(slot: Int): Int = preferences.getInt("connections-$slot", 8).coerceIn(1, 32)
 
+    fun setConnections(slot: Int, count: Int) {
+        require(slot >= 0 && count in 1..32)
+        check(preferences.edit().putInt("connections-$slot", count).remove("speed-$slot").commit()) {
+            "Cannot save download settings"
+        }
+    }
+
     fun speed(slot: Int): Long? = preferences.getLong("speed-$slot", -1L).takeIf { it >= 0 }
 
     fun recordSpeed(slot: Int, bytesPerSecond: Long) {
