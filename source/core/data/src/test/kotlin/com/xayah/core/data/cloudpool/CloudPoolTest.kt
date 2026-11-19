@@ -96,7 +96,11 @@ class CloudPoolTest {
         assertTrue(bytes.contentEquals(second.objects.getValue(manifest.manifestCopies.getValue("slow"))))
         assertTrue(a.delete())
         assertTrue(b.delete())
-        val restored = CloudSnapshot(listOf(second, first), temporary.newFolder()).retrieve(bytes, passphrase)
+        val progress = mutableListOf<Pair<Int, Int>>()
+        val restored = CloudSnapshot(listOf(second, first), temporary.newFolder()).retrieve(bytes, passphrase) { done, total ->
+            progress += done to total
+        }
+        assertEquals(listOf(0 to 2, 1 to 2, 2 to 2), progress)
         assertEquals("first", File(restored, "apps/a/archive").readText())
         assertEquals("second", File(restored, "apps/b/archive").readText())
     }
