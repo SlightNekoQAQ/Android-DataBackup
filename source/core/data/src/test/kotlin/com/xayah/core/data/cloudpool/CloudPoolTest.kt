@@ -79,6 +79,19 @@ class CloudPoolTest {
         return checkNotNull(result).getOrThrow()
     }
 
+    @Test fun manifestRoundTripsAndRejectsTamperingOrDuplicatePaths() {
+        val entry = CloudArchive("apps/app/archive", "account", "file", 42, "a".repeat(64))
+        val passphrase = "test-passphrase".toCharArray()
+        val encoded = CloudManifest.encode(listOf(entry), passphrase)
+        assertEquals(listOf(entry), CloudManifest.decode(encoded, passphrase))
+        assertThrows(IllegalArgumentException::class.java) {
+            CloudManifest.decode(encoded, "wrong-passphrase".toCharArray())
+        }
+        encoded[encoded.lastIndex] = (encoded.last().toInt() xor 1).toByte()
+        assertThrows(IllegalArgumentException::class.java) { CloudManifest.decode(encoded, passphrase) }
+        assertThrows(IllegalArgumentException::class.java) { CloudManifest.encode(listOf(entry, entry), passphrase) }
+    }
+
     @Test fun parsesAllTenPlatformRecordsAndSkipsNonDriveCredentials() {
         val platforms = mapOf(
             "quark" to "cookie", "uc" to "cookie", "xunlei" to "accessToken", "baidu" to "cookie",

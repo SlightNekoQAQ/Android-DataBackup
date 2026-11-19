@@ -91,7 +91,7 @@ class CloudTransfer(drives: Collection<CloudDrive>) {
     }
 }
 
-private fun validateRelativePath(path: String) {
+internal fun validateRelativePath(path: String) {
     require('\\' !in path && '\u0000' !in path && path.split('/').none { it.isBlank() || it == "." || it == ".." }) {
         "Invalid archive path"
     }
