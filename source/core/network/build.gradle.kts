@@ -5,6 +5,7 @@ plugins {
 
 android {
     namespace = "com.xayah.core.network"
+    sourceSets.getByName("main").jniLibs.srcDir(layout.buildDirectory.dir("gopeed/jni"))
 }
 
 dependencies {
@@ -17,6 +18,7 @@ dependencies {
 
     // OkHttp
     implementation(libs.okhttp)
+    implementation(files("libs/gopeed-classes.jar"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.core.jvm)
 

@@ -29,6 +29,8 @@ jobs:
           distribution: zulu
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare verified Gopeed kernels
+        run: bash core/network/gopeed-kernel.sh
       - name: Test cloud backup core
         run: bash ./gradlew --no-daemon :core:data:testDebugUnitTest
       - name: Build installable FOSS debug APKs

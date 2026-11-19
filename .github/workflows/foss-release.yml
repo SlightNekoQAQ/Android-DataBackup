@@ -44,6 +44,8 @@ jobs:
           if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', version) or version != actual:
               raise SystemExit(f'Requested version must match Gradle version {actual!r}')
           PY
+      - name: Prepare verified Gopeed kernels
+        run: bash core/network/gopeed-kernel.sh
       - name: Build and verify signed APKs
         env:
           STORE_FILE: ci-release.keystore
