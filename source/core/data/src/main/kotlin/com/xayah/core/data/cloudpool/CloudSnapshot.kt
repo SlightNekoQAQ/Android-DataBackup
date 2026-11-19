@@ -122,6 +122,12 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         }
     }
 
-    suspend fun retrieve(manifest: ByteArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File =
-        retrieveAvailable(manifest, onProgress).folder
+    suspend fun retrieve(manifest: ByteArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File {
+        val result = retrieveAvailable(manifest, onProgress)
+        if (result.unavailable.isNotEmpty()) {
+            result.folder.deleteRecursively()
+            throw IOException("${result.unavailable.size} cloud archive(s) could not be verified or downloaded")
+        }
+        return result.folder
+    }
 }
