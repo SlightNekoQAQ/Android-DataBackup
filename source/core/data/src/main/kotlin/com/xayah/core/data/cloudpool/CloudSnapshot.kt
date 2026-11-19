@@ -49,7 +49,7 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         private var finished = false
         private var failed = false
 
-        suspend fun append(source: Source, deleteAfterUpload: Boolean = false) = withContext(Dispatchers.IO) {
+        suspend fun append(source: Source, afterConfirmedUpload: suspend () -> Unit = {}) = withContext(Dispatchers.IO) {
             check(!finished && !failed)
             try {
                 validateRelativePath(source.relativePath)
@@ -59,7 +59,7 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
                 try {
                     CloudPayload.encrypt(source.file, encrypted, passphrase, source.relativePath)
                     entries += transfer.store(encrypted, source.relativePath, "db-$id-${entries.size}.bin", targets, manual)
-                    if (deleteAfterUpload && !source.file.delete()) throw IOException("Cannot clean up uploaded temporary archive")
+                    afterConfirmedUpload()
                 } finally { encrypted.delete() }
             } catch (error: Exception) {
                 failed = true

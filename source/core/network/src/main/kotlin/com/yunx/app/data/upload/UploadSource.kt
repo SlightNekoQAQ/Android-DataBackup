@@ -63,7 +63,19 @@ data class UploadSource(
             } catch (error: IOException) {
                 stream.close()
                 throw error
+            } catch (error: RuntimeException) {
+                // Non-file channel (rare): fall back to reopening and skipping.
+                stream.close()
             }
+            val raw = local.inputStream()
+            var remaining = start
+            val buffer = ByteArray(SKIP_BUFFER)
+            while (remaining > 0) {
+                val read = raw.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                if (read < 0) { raw.close(); throw IOException("Backup archive is shorter than declared") }
+                remaining -= read
+            }
+            return BoundedInputStream(raw, end - start)
         }
         val descriptor = runCatching { resolver.openFileDescriptor(uri, "r") }.getOrNull()
         if (descriptor != null) {

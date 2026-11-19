@@ -18,14 +18,17 @@ class YunxCloudDrive(
     private val gopeed = GopeedRestore(context)
 
     init {
-        require(directoryId != drive.rootId && directoryId.isNotBlank())
+        require(directoryId.isNotBlank())
         require(connections in 1..32)
     }
 
-    suspend fun target(priority: Int, measuredBytesPerSecond: Long?): CloudTarget {
-        val quota = drive.quota()
-        val free = quota?.let { if (it.total <= 0 || it.used < 0) null else (it.total - it.used).coerceAtLeast(0) }
-        return CloudTarget(accountId, priority, measuredBytesPerSecond, free, drive.maxFileBytes)
+    val maxFileBytes: Long? get() = drive.maxFileBytes
+
+    /** Free bytes when the provider reports a usable quota; null means unknown, never "full". */
+    suspend fun quotaSnapshot(): Long? {
+        val quota = drive.quota() ?: return null
+        if (quota.total <= 0 || quota.used < 0) return null
+        return (quota.total - quota.used).coerceAtLeast(0)
     }
 
     override suspend fun upload(source: File, remoteName: String): String {

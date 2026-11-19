@@ -51,7 +51,7 @@ class CloudBackupRepository(context: Context) {
                 } catch (error: Exception) {
                     findFolder()?.let(drive::directoryId) ?: throw error
                 }
-                require(folder.isNotBlank() && folder != drive.rootId)
+                require(folder.isNotBlank())
                 preferences.saveDefaultFolder(slot, folder)
                 true
             } catch (error: CancellationException) {
@@ -81,15 +81,15 @@ class CloudBackupRepository(context: Context) {
         val session = begin(password)
         onProgress(0, sources.size)
         sources.forEachIndexed { index, source ->
-            session.append(source.file, source.relativePath, deleteAfterUpload = false)
+            session.append(source.file, source.relativePath)
             onProgress(index + 1, sources.size)
         }
         session.finish()
     }
 
     class UploadSession internal constructor(private val writer: CloudSnapshot.Writer, private val confirm: (CloudSnapshot.Published) -> Unit) {
-        suspend fun append(file: File, relativePath: String, deleteAfterUpload: Boolean = true) =
-            writer.append(CloudSnapshot.Source(relativePath, file), deleteAfterUpload)
+        suspend fun append(file: File, relativePath: String, afterConfirmedUpload: suspend () -> Unit = {}) =
+            writer.append(CloudSnapshot.Source(relativePath, file), afterConfirmedUpload)
         suspend fun finish() = writer.finish().also(confirm)
     }
 
@@ -100,7 +100,17 @@ class CloudBackupRepository(context: Context) {
         val drives = accounts.map { it.asDrive() }
         val manualOrder = preferences.manualOrder()
         val ordered = uploadSlotOrder(accounts.map { it.slot }, manualOrder)
-        val targets = drives.zip(accounts).map { (drive, account) -> drive.target(ordered.indexOf(account.slot), preferences.speed(account.slot)) }
+        // A provider quota probe must never veto an otherwise writable account. Unknown quota is
+        // "unknown", not "full"; only explicit provider rejections cause failover at upload time.
+        val targets = drives.zip(accounts).map { (drive, account) ->
+            CloudTarget(
+                accountId = account.key,
+                priority = ordered.indexOf(account.slot),
+                downloadBytesPerSecond = preferences.speed(account.slot),
+                freeBytes = runCatching { drive.quotaSnapshot() }.getOrNull(),
+                maxFileBytes = drive.maxFileBytes,
+            )
+        }
         UploadSession(CloudSnapshot(drives, staging).begin(targets, password, useManualOrder = manualOrder != null)) { published ->
             val confirmedProviders = accounts.filter { it.key in published.manifestCopies }.map { it.account.platform }.distinct()
             receipts.edit().putString("snapshot-and-providers", "${published.id} · ${confirmedProviders.joinToString()}").apply()

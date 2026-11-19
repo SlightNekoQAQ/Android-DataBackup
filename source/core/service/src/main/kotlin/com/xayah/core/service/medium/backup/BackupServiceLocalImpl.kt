@@ -92,7 +92,12 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
 
     override suspend fun onTargetDirsCreated() {
         val password = cloudPassword ?: return
-        session = CloudBackupRepository(mContext).begin(password)
+        runCatching { CloudBackupRepository(mContext).begin(password) }
+            .onSuccess { session = it }
+            .onFailure {
+                cloudFailed = true
+                log { "CLOUD_SESSION_FAILED: ${it.javaClass.name}: ${it.message}" }
+            }
     }
 
     private suspend fun uploadCurrent(path: String) {
@@ -110,8 +115,14 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
 
     override suspend fun onConfigSaved(path: String, archivesRelativeDir: String) {
         if (cloudPassword == null || cloudFailed) return
-        try { uploadCurrent(path) } catch (error: CancellationException) { throw error }
-        catch (_: Exception) { cloudFailed = true }
+        try {
+            uploadCurrent(path)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            cloudFailed = true
+            log { "CLOUD_UPLOAD_FAILED: ${error.javaClass.name}: ${error.message}" }
+        }
     }
 
     override fun onDestroy() {
@@ -127,6 +138,7 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
             check(!cloudFailed && mTaskEntity.failureCount == 0) { "Cloud backup incomplete" }
             val result = checkNotNull(session).finish()
             check(result.missingCopies.isEmpty()) { "Not all cloud recovery indexes could be uploaded" }
+            require(File(mRootDir).name.startsWith("cloud-work-")) { "Refusing to clean non-staging directory" }
             check(mRootService.deleteRecursively(mRootDir)) { "Could not clean cloud staging" }
         } finally {
             session = null

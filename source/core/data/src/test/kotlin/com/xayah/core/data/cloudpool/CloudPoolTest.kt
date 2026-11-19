@@ -94,12 +94,12 @@ class CloudPoolTest {
         val writer = snapshot.begin(listOf(fast.copy(freeBytes = 150, maxFileBytes = null, priority = 1),
             slow.copy(freeBytes = 81, priority = 0)), passphrase, useManualOrder = true)
         val a = temporary.newFile().apply { writeText("first") }
-        writer.append(CloudSnapshot.Source("apps/a/archive", a), deleteAfterUpload = true)
+        writer.append(CloudSnapshot.Source("apps/a/archive", a)) { a.delete() }
         assertFalse(a.exists())
         assertEquals(1, second.objects.size)
         assertTrue(first.objects.isEmpty())
         val b = temporary.newFile().apply { writeText("second") }
-        writer.append(CloudSnapshot.Source("apps/b/archive", b), deleteAfterUpload = true)
+        writer.append(CloudSnapshot.Source("apps/b/archive", b)) { b.delete() }
         assertFalse(b.exists())
         assertEquals(1, first.objects.size)
         assertEquals(1, second.objects.size)
@@ -134,7 +134,7 @@ class CloudPoolTest {
         val drive = MemoryDrive("fast", IOException("offline"))
         val writer = CloudSnapshot(listOf(drive), temporary.newFolder()).begin(listOf(fast.copy(maxFileBytes = null)), "test-passphrase".toCharArray())
         val archive = temporary.newFile().apply { writeText("original") }
-        val upload = runCatching { writer.append(CloudSnapshot.Source("apps/a/archive", archive), deleteAfterUpload = true) }
+        val upload = runCatching { writer.append(CloudSnapshot.Source("apps/a/archive", archive)) { archive.delete() } }
         assertTrue(upload.exceptionOrNull() is IOException)
         assertEquals("original", archive.readText())
         assertTrue(runCatching { writer.finish() }.isFailure)
