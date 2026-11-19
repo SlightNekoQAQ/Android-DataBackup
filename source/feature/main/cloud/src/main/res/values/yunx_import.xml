@@ -25,4 +25,5 @@
     <string name="yunx_speed_test">Test download speed</string>
     <string name="yunx_speed_failed">Test failed: use a 1–16 MiB file</string>
     <string name="yunx_speed_result">%1$d KiB/s</string>
+    <string name="yunx_job_progress">Processed %1$d of %2$d files</string>
 </resources>

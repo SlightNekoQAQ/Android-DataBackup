@@ -17,6 +17,7 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         targets: List<CloudTarget>,
         passphrase: CharArray,
         useManualOrder: Boolean = false,
+        onProgress: (Int, Int) -> Unit = { _, _ -> },
     ): Published = withContext(Dispatchers.IO) {
         require(passphrase.size >= 8)
         require(sources.isNotEmpty() && sources.map(Source::relativePath).distinct().size == sources.size)
@@ -27,6 +28,7 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         check(privateStaging.isDirectory || privateStaging.mkdirs())
         val temporary = File.createTempFile("manifest-", ".partial", privateStaging)
         try {
+            onProgress(0, sources.size)
             sources.forEachIndexed { index, source ->
                 // The user-visible archive path lives only in the encrypted manifest.
                 val encrypted = File.createTempFile("payload-", ".partial", privateStaging)
@@ -36,6 +38,7 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
                 } finally {
                     encrypted.delete()
                 }
+                onProgress(index + 1, sources.size)
             }
             temporary.writeBytes(CloudManifest.encode(entries, passphrase))
             val copies = linkedMapOf<String, String>()
@@ -60,7 +63,7 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
     }
 
     /** Downloads verified files to a new tree. An incomplete tree never reaches the restore caller. */
-    suspend fun retrieve(manifest: ByteArray, passphrase: CharArray): File = withContext(Dispatchers.IO) {
+    suspend fun retrieve(manifest: ByteArray, passphrase: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
         val archives = CloudManifest.decode(manifest, passphrase)
         val missing = archives.map(CloudArchive::accountId).toSet() - drives.map(CloudDrive::accountId).toSet()
         if (missing.isNotEmpty()) throw IOException("One or more required cloud accounts are unavailable")
@@ -71,13 +74,15 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
             val incoming = File(privateStaging, "incoming-${UUID.randomUUID()}")
             check(incoming.mkdirs())
             try {
-                archives.forEach { archive ->
+                onProgress(0, archives.size)
+                archives.forEachIndexed { index, archive ->
                     val encrypted = transfer.retrieve(archive, incoming)
                     val plain = File(staging, archive.relativePath)
                     val parent = checkNotNull(plain.parentFile)
                     check(parent.isDirectory || parent.mkdirs())
                     CloudPayload.decrypt(encrypted, plain, passphrase, archive.relativePath)
                     encrypted.delete()
+                    onProgress(index + 1, archives.size)
                 }
             } finally {
                 incoming.deleteRecursively()

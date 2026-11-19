@@ -26,7 +26,7 @@ class CloudBackupRepository(context: Context) {
 
     private fun Configured.asDrive() = YunxCloudDrive(context, account, key, folder, preferences.connections(slot))
 
-    suspend fun publish(localRoot: File, password: CharArray): CloudSnapshot.Published = withContext(Dispatchers.IO) {
+    suspend fun publish(localRoot: File, password: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): CloudSnapshot.Published = withContext(Dispatchers.IO) {
         val accounts = configured()
         require(accounts.isNotEmpty()) { "Select a backup folder on at least one cloud account" }
         val root = localRoot.canonicalFile
@@ -36,7 +36,7 @@ class CloudBackupRepository(context: Context) {
         }
         val drives = accounts.map { it.asDrive() }
         val targets = drives.zip(accounts).map { (drive, account) -> drive.target(account.slot, preferences.speed(account.slot)) }
-        CloudSnapshot(drives, staging).publish(sources, targets, password)
+        CloudSnapshot(drives, staging).publish(sources, targets, password, onProgress = onProgress)
     }
 
     suspend fun measureSpeed(slot: Int): Long = withContext(Dispatchers.IO) {
@@ -66,7 +66,7 @@ class CloudBackupRepository(context: Context) {
         }
     }
 
-    suspend fun restore(backup: RemoteBackup, password: CharArray): File = withContext(Dispatchers.IO) {
+    suspend fun restore(backup: RemoteBackup, password: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
         val accounts = configured()
         val source = accounts.singleOrNull { it.key == backup.accountKey } ?: throw IOException("Backup account is not configured")
         val remote = source.account.personalDrive(context).list(source.folder).singleOrNull { it.fid == backup.objectId && it.isManifest() }
@@ -77,7 +77,7 @@ class CloudBackupRepository(context: Context) {
         try {
             source.asDrive().download(remote.fid, temp)
             if (temp.length() != remote.fsize) throw IOException("Incomplete backup manifest")
-            CloudSnapshot(accounts.map { it.asDrive() }, staging).retrieve(temp.readBytes(), password)
+            CloudSnapshot(accounts.map { it.asDrive() }, staging).retrieve(temp.readBytes(), password, onProgress)
         } finally {
             temp.delete()
         }

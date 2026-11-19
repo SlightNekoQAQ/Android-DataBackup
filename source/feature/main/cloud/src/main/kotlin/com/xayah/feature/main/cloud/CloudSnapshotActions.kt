@@ -32,6 +32,8 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalAnimationApi::class)
@@ -40,6 +42,8 @@ internal fun CloudSnapshotActions() {
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { CloudBackupRepository(context) }
     val scope = rememberCoroutineScope()
+    val progressUpdates = remember { MutableStateFlow<Pair<Int, Int>?>(null) }
+    val progress by progressUpdates.collectAsState()
     var mode by remember { mutableStateOf<Int?>(null) }
     var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
@@ -73,7 +77,8 @@ internal fun CloudSnapshotActions() {
         }
         if (busy || message.isNotBlank()) Clickable(
             readOnly = true,
-            title = if (busy) stringResource(R.string.yunx_job_running) else message,
+            title = if (busy) progress?.let { (done, total) -> stringResource(R.string.yunx_job_progress, done, total) }
+                ?: stringResource(R.string.yunx_job_running) else message,
         )
     }
     candidates?.let { options ->
@@ -106,14 +111,15 @@ internal fun CloudSnapshotActions() {
                 password = ""
                 mode = null
                 busy = true
+                progressUpdates.value = null
                 scope.launch {
                     try {
                         val localRoot = withContext(Dispatchers.IO) { File(context.localBackupSaveDir()) }
                         message = if (action == 0) {
-                            val result = repository.publish(localRoot, passphrase)
+                            val result = repository.publish(localRoot, passphrase) { done, total -> progressUpdates.value = done to total }
                             if (result.missingCopies.isEmpty()) complete else incomplete
                         } else {
-                            val staging = repository.restore(checkNotNull(backup), passphrase)
+                            val staging = repository.restore(checkNotNull(backup), passphrase) { done, total -> progressUpdates.value = done to total }
                             val dest = withContext(Dispatchers.IO) {
                                 // Keep the existing local repository intact. Import via DataBackup's folder picker.
                                 val output = File(localRoot, "cloud-restore-${UUID.randomUUID()}")
@@ -134,6 +140,7 @@ internal fun CloudSnapshotActions() {
                         message = failed
                     } finally {
                         passphrase.fill('\u0000')
+                        progressUpdates.value = null
                         busy = false
                     }
                 }
