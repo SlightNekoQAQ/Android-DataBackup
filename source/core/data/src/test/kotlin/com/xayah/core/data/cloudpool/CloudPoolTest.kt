@@ -5,6 +5,7 @@ import java.io.IOException
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.startCoroutine
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Rule
@@ -40,7 +41,7 @@ class CloudPoolTest {
         val freshSession = CloudTransfer(listOf(second))
         val restored = immediate { freshSession.retrieve(archive, temporary.newFolder()) }
         assertEquals("backup", restored.readText())
-        second.data = "broken".toByteArray()
+        second.objects[archive.fileId] = "broken".toByteArray()
         val corrupted = temporary.newFolder()
         assertThrows(IOException::class.java) { immediate { freshSession.retrieve(archive, corrupted) } }
         assertFalse(File(corrupted, archive.relativePath).exists())
@@ -55,17 +56,16 @@ class CloudPoolTest {
     }
 
     private class MemoryDrive(override val accountId: String, private val failure: IOException? = null) : CloudDrive {
-        var data = byteArrayOf()
+        val objects = mutableMapOf<String, ByteArray>()
         var uploads = 0
         override suspend fun upload(source: File, remoteName: String): String {
             uploads++
             failure?.let { throw it }
-            data = source.readBytes()
-            return "private-file-id"
+            objects[remoteName] = source.readBytes()
+            return remoteName
         }
         override suspend fun download(fileId: String, destination: File) {
-            check(fileId == "private-file-id")
-            destination.writeBytes(data)
+            destination.writeBytes(objects.getValue(fileId))
         }
     }
 
@@ -77,6 +77,28 @@ class CloudPoolTest {
             override fun resumeWith(value: Result<T>) { result = value }
         })
         return checkNotNull(result).getOrThrow()
+    }
+
+    @Test fun publishesManifestToBothDisksAndRestoresWithoutOriginalFiles() = runBlocking {
+        val first = MemoryDrive("fast")
+        val second = MemoryDrive("slow")
+        val a = temporary.newFile().apply { writeText("first") }
+        val b = temporary.newFile().apply { writeText("second") }
+        val passphrase = "test-passphrase".toCharArray()
+        val snapshot = CloudSnapshot(listOf(first, second), temporary.newFolder())
+        val manifest = snapshot.publish(
+            listOf(CloudSnapshot.Source("apps/a/archive", a), CloudSnapshot.Source("apps/b/archive", b)),
+            listOf(fast.copy(freeBytes = 5), slow), passphrase,
+        )
+        assertEquals(setOf("fast", "slow"), manifest.manifestCopies.keys)
+        assertTrue(manifest.missingCopies.isEmpty())
+        val bytes = first.objects.getValue(manifest.manifestCopies.getValue("fast"))
+        assertTrue(bytes.contentEquals(second.objects.getValue(manifest.manifestCopies.getValue("slow"))))
+        assertTrue(a.delete())
+        assertTrue(b.delete())
+        val restored = CloudSnapshot(listOf(second, first), temporary.newFolder()).retrieve(bytes, passphrase)
+        assertEquals("first", File(restored, "apps/a/archive").readText())
+        assertEquals("second", File(restored, "apps/b/archive").readText())
     }
 
     @Test fun manifestRoundTripsAndRejectsTamperingOrDuplicatePaths() {

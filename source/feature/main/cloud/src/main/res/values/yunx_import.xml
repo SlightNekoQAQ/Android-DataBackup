@@ -5,4 +5,10 @@
     <string name="yunx_export_password">YunX export password (blank for plaintext)</string>
     <string name="yunx_import_failed">Could not read cloud accounts. Check the export file and password.</string>
     <string name="yunx_import_confirm">Import</string>
+    <string name="yunx_account_group">Cloud drive accounts</string>
+    <string name="yunx_browse_failed">Could not load this folder. Check the connection and account session.</string>
+    <string name="yunx_empty_folder">This folder is empty.</string>
+    <string name="yunx_parent_folder">Parent folder</string>
+    <string name="yunx_choose_folder">Select backup folder</string>
+    <string name="yunx_folder_selected">Backup folder selected</string>
 </resources>

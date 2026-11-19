@@ -5,4 +5,10 @@
     <string name="yunx_export_password">云析导出口令（明文导出留空）</string>
     <string name="yunx_import_failed">无法读取网盘账号，请检查导出文件和口令。</string>
     <string name="yunx_import_confirm">导入</string>
+    <string name="yunx_account_group">网盘账号</string>
+    <string name="yunx_browse_failed">无法加载目录，请检查网络和账号登录状态。</string>
+    <string name="yunx_empty_folder">此目录为空。</string>
+    <string name="yunx_parent_folder">上级目录</string>
+    <string name="yunx_choose_folder">选择备份目录</string>
+    <string name="yunx_folder_selected">已选备份目录</string>
 </resources>

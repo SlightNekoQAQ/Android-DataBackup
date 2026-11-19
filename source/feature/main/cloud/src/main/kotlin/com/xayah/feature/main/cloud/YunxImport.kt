@@ -3,7 +3,11 @@ package com.xayah.feature.main.cloud
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -19,17 +23,22 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.xayah.core.data.cloudpool.CloudAccountVault
+import com.xayah.core.data.cloudpool.CloudDestinationPreferences
 import com.xayah.core.data.cloudpool.ImportedCloudAccount
 import com.xayah.core.data.cloudpool.YunxCredentialImport
+import com.xayah.core.ui.component.Clickable
+import com.xayah.core.ui.component.Title
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalAnimationApi::class)
 @Composable
 internal fun YunxImport() {
     val context = LocalContext.current.applicationContext
     val vault = remember(context) { CloudAccountVault(context) }
+    val destinations = remember(context) { CloudDestinationPreferences(context) }
     val scope = rememberCoroutineScope()
     var uri by remember { mutableStateOf<Uri?>(null) }
     var password by remember { mutableStateOf("") }
@@ -52,12 +61,35 @@ internal fun YunxImport() {
             failed = true
         }
     }
-    Column {
-        TextButton(enabled = !busy, onClick = { picker.launch(arrayOf("*/*")) }) {
-            Text(stringResource(R.string.yunx_import_accounts))
+    var inspected by remember { mutableStateOf<Int?>(null) }
+    var configured by remember { mutableStateOf(emptySet<Int>()) }
+    LaunchedEffect(accounts) {
+        configured = withContext(Dispatchers.IO) { accounts.indices.filter { destinations.read(it) != null }.toSet() }
+    }
+    Title(title = stringResource(R.string.yunx_account_group)) {
+        accounts.forEachIndexed { slot, account ->
+            Clickable(
+                enabled = !busy,
+                icon = Icons.Outlined.Cloud,
+                title = providerName(account.platform),
+                value = listOf(account.nickname, stringResource(if (slot in configured) R.string.yunx_folder_selected else R.string.yunx_choose_folder)).filter(String::isNotBlank).joinToString(" · "),
+            ) { inspected = slot }
         }
-        accounts.forEach { account -> Text(listOf(account.platform, account.nickname).filter(String::isNotBlank).joinToString(" · ")) }
-        if (failed) Text(stringResource(R.string.yunx_import_failed))
+        Clickable(
+            enabled = !busy,
+            icon = Icons.Rounded.Add,
+            title = stringResource(R.string.yunx_import_accounts),
+        ) { picker.launch(arrayOf("*/*")) }
+        if (failed && uri == null) Text(stringResource(R.string.yunx_import_failed))
+    }
+    inspected?.let { slot ->
+        accounts.getOrNull(slot)?.let { account ->
+            YunxAccountBrowser(account, onDismiss = { inspected = null }, onSelect = { folder ->
+                withContext(Dispatchers.IO) { destinations.select(slot, folder) }
+                configured = configured + slot
+                inspected = null
+            })
+        }
     }
     val selected = uri ?: return
     AlertDialog(
@@ -99,6 +131,7 @@ internal fun YunxImport() {
                             } ?: error("Unable to read credential document")
                             YunxCredentialImport.parse(content, pass).also { imported ->
                                 require(imported.isNotEmpty())
+                                destinations.clear()
                                 vault.save(imported)
                             }
                         }

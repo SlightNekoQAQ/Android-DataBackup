@@ -14,6 +14,7 @@ class ImportedCloudAccount internal constructor(val platform: String, val nickna
     private val credentials = fields.toMap()
     fun credential(name: String): String? = credentials[name]
     internal fun credentialFields(): Map<String, String> = credentials.toMap()
+    fun personalDrive(context: android.content.Context) = com.yunx.app.data.network.PersonalDrive(context, platform, credentials)
     override fun toString(): String = "ImportedCloudAccount(platform=$platform)"
 }
 
