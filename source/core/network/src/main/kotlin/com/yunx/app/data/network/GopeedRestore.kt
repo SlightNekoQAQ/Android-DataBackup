@@ -44,9 +44,18 @@ class GopeedRestore(context: Context) {
             if (!task.matches(Regex("[A-Za-z0-9_-]{1,128}"))) throw IOException("Gopeed did not create a restore task")
             id = task
             val path = "/api/v1/tasks/$task"
+            var previousBytes = -1L
+            var lastProgress = android.os.SystemClock.elapsedRealtime()
             while (true) {
                 val status = call("GET", "$path/status").optJSONObject("data") ?: throw IOException("Missing Gopeed status")
-                onProgress(status.optLong("downloaded"), status.optLong("total"))
+                val downloaded = status.optLong("downloaded")
+                onProgress(downloaded, status.optLong("total"))
+                if (downloaded != previousBytes) {
+                    previousBytes = downloaded
+                    lastProgress = android.os.SystemClock.elapsedRealtime()
+                } else if (android.os.SystemClock.elapsedRealtime() - lastProgress > 180_000L) {
+                    throw IOException("Gopeed download stopped making progress")
+                }
                 when (status.optString("status")) {
                     "done" -> break
                     "error", "paused" -> throw IOException("Gopeed could not download the backup")

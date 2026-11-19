@@ -16,7 +16,9 @@ import com.xayah.core.model.database.TaskEntity
 import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.service.util.MediumBackupUtil
+import com.xayah.core.util.NotificationUtil
 import com.xayah.core.util.PathUtil
+import com.xayah.core.service.R
 import com.xayah.core.util.localBackupSaveDir
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -86,7 +88,10 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
             val folders = mMediaEntities.filter { it.state == OperationState.DONE }
                 .map { "files/${it.mediaEntity.archivesRelativeDir}" }.toSet()
             require(folders.isNotEmpty()) { "No completed file backups to upload" }
-            val result = CloudBackupRepository(mContext).publish(File(mRootDir), password, folders)
+            val result = CloudBackupRepository(mContext).publish(File(mRootDir), password, folders) { done, total ->
+                NotificationUtil.notify(mContext, mNotificationBuilder, mContext.getString(R.string.backing_up),
+                    "$done / $total", max = total, progress = done)
+            }
             check(result.missingCopies.isEmpty()) { "Not all cloud recovery indexes could be uploaded" }
         } finally { password.fill('\u0000') }
     }
