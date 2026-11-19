@@ -31,7 +31,22 @@ class YunxCloudDrive(
     override suspend fun upload(source: File, remoteName: String): String {
         val max = drive.maxFileBytes
         if (max != null && source.length() > max) throw CloudCapacityException("Archive exceeds provider size limit")
-        return drive.upload(directoryId, source, remoteName)
+        return try {
+            drive.upload(directoryId, source, remoteName)
+        } catch (error: kotlinx.coroutines.CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            // Only explicit server quota/size rejections are eligible for failover. A lost ACK
+            // or expired login may have committed a file already; don't silently write elsewhere.
+            if (isCapacityRejection(error.message.orEmpty())) throw CloudCapacityException("Cloud capacity rejected the archive")
+            throw error
+        }
+    }
+
+    private fun isCapacityRejection(message: String): Boolean {
+        val text = message.lowercase(java.util.Locale.ROOT)
+        return listOf("storage quota exceeded", "insufficient storage", "file too large", "空间不足", "容量不足",
+            "空间已满", "容量已满", "存储空间已用完", "超过单文件", "单文件最大", "文件大小超出").any(text::contains)
     }
 
     override suspend fun download(fileId: String, destination: File) {

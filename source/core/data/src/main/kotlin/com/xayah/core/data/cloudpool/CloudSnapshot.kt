@@ -5,6 +5,11 @@ import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /** A collection of finalized DataBackup archives and sidecars, indexed by their relative paths. */
@@ -75,14 +80,23 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
             check(incoming.mkdirs())
             try {
                 onProgress(0, archives.size)
-                archives.forEachIndexed { index, archive ->
-                    val encrypted = transfer.retrieve(archive, incoming)
-                    val plain = File(staging, archive.relativePath)
-                    val parent = checkNotNull(plain.parentFile)
-                    check(parent.isDirectory || parent.mkdirs())
-                    CloudPayload.decrypt(encrypted, plain, passphrase, archive.relativePath)
-                    encrypted.delete()
-                    onProgress(index + 1, archives.size)
+                val slots = Semaphore(3)
+                val progressLock = Any()
+                var completed = 0
+                coroutineScope {
+                    archives.groupBy(CloudArchive::accountId).values.map { accountArchives ->
+                        async {
+                            for (archive in accountArchives) slots.withPermit {
+                                val encrypted = transfer.retrieve(archive, incoming)
+                                val plain = File(staging, archive.relativePath)
+                                val parent = checkNotNull(plain.parentFile)
+                                check(parent.isDirectory || parent.mkdirs() || parent.isDirectory)
+                                CloudPayload.decrypt(encrypted, plain, passphrase, archive.relativePath)
+                                encrypted.delete()
+                                synchronized(progressLock) { onProgress(++completed, archives.size) }
+                            }
+                        }
+                    }.awaitAll()
                 }
             } finally {
                 incoming.deleteRecursively()

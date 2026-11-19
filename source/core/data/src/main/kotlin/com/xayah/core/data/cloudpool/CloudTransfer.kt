@@ -76,7 +76,7 @@ class CloudTransfer(drives: Collection<CloudDrive>) {
         require(destination.path.startsWith(root.path.trimEnd('/') + '/'))
         if (destination.exists()) throw IOException("Archive already exists in restore staging")
         val directory = checkNotNull(destination.parentFile)
-        if (!directory.isDirectory && !directory.mkdirs()) throw IOException("Cannot create restore directory")
+        if (!directory.isDirectory && !directory.mkdirs() && !directory.isDirectory) throw IOException("Cannot create restore directory")
         val partial = File.createTempFile("cloud-", ".partial", directory)
         try {
             driver.download(archive.fileId, partial)
