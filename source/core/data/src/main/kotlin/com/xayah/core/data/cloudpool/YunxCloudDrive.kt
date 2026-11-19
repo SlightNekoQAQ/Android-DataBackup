@@ -15,8 +15,9 @@ class YunxCloudDrive(
     private val connections: Int,
 ) : CloudDrive {
     private val importedAccount = account
+    private val driveContext = context.applicationContext
     /** Account identity returned by the provider API, consistent across devices. */
-    suspend fun verifiedAccountIdentity(): String = importedAccount.verifiedIdentity(context)
+    suspend fun verifiedAccountIdentity(): String = importedAccount.verifiedIdentity(driveContext)
     private val drive = PersonalDrive(context, account.platform, account.credentialFields())
     private val gopeed = GopeedRestore(context)
 
