@@ -27,6 +27,10 @@ class CloudBackupRepository(context: Context) {
 
     private fun Configured.asDrive() = YunxCloudDrive(context, account, key, folder, preferences.connections(slot))
 
+    private val receipts = this.context.getSharedPreferences("cloud-backup-receipts", Context.MODE_PRIVATE)
+
+    fun lastConfirmedUpload(): String? = receipts.getString("snapshot-and-providers", null)
+
     fun hasDestinations(): Boolean = configured().isNotEmpty()
 
     suspend fun publish(localRoot: File, password: CharArray, folders: Set<String>? = null, onProgress: (Int, Int) -> Unit = { _, _ -> }): CloudSnapshot.Published = withContext(Dispatchers.IO) {
@@ -40,7 +44,10 @@ class CloudBackupRepository(context: Context) {
         }
         val drives = accounts.map { it.asDrive() }
         val targets = drives.zip(accounts).map { (drive, account) -> drive.target(account.slot, preferences.speed(account.slot)) }
-        CloudSnapshot(drives, staging).publish(sources, targets, password, onProgress = onProgress)
+        CloudSnapshot(drives, staging).publish(sources, targets, password, onProgress = onProgress).also { published ->
+            val confirmedProviders = accounts.filter { it.key in published.manifestCopies }.map { it.account.platform }.distinct()
+            receipts.edit().putString("snapshot-and-providers", "${published.id} · ${confirmedProviders.joinToString()}").apply()
+        }
     }
 
     suspend fun measureSpeed(slot: Int): Long = withContext(Dispatchers.IO) {

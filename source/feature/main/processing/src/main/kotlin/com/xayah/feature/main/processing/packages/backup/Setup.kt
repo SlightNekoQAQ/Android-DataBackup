@@ -94,9 +94,10 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
                     .paddingVertical(SizeTokens.Level8),
                 horizontalArrangement = Arrangement.spacedBy(SizeTokens.Level12, Alignment.End),
             ) {
-                Button(
+                if (uiState.storageIndex != 2) Button(
                     enabled = uiState.storageType == StorageMode.Local || (uiState.cloudEntity != null && isTesting.not()),
                     onClick = {
+                        com.xayah.core.data.cloudpool.CloudBackupRequest.disarm(com.xayah.core.data.cloudpool.CloudBackupRequest.Kind.APPS)
                         viewModel.emitIntentOnIO(FinishSetup(navController = localNavController))
                     }) {
                     Text(text = stringResource(id = R.string._continue))
@@ -109,7 +110,7 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
                 .verticalScroll(rememberScrollState())
                 .fillMaxSize(),
         ) {
-            val storageOptions = remember { listOf(context.getString(R.string.local), context.getString(R.string.cloud)) }
+            val storageOptions = listOf(stringResource(R.string.local), stringResource(R.string.yunx_protocol_tab), stringResource(R.string.yunx_pool_tab))
             SingleChoiceSegmentedButtonRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -120,7 +121,7 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
                     SegmentedButton(
                         shape = SegmentedButtonDefaults.itemShape(index = index, count = storageOptions.size),
                         onClick = {
-                            viewModel.emitStateOnMain(state = uiState.copy(storageIndex = index, storageType = if (index == 0) StorageMode.Local else StorageMode.Cloud))
+                            viewModel.emitStateOnMain(state = uiState.copy(storageIndex = index, storageType = if (index == 1) StorageMode.Cloud else StorageMode.Local))
                         },
                         selected = index == uiState.storageIndex
                     ) {
@@ -130,7 +131,7 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
             }
 
             Title(title = stringResource(id = R.string.storage)) {
-                if (uiState.storageType == StorageMode.Local) {
+                if (uiState.storageIndex == 2) {
                     com.xayah.feature.main.processing.CloudPoolBackupOption(
                         kind = com.xayah.core.data.cloudpool.CloudBackupRequest.Kind.APPS,
                         onStart = { viewModel.emitIntentOnIO(FinishSetup(navController = localNavController)) },

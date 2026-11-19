@@ -3,4 +3,6 @@
     <string name="yunx_start_backup_desc">Back up the selected items, then encrypt and upload them to your configured cloud drives.</string>
     <string name="yunx_setup_destination">Import an account and select a backup folder first.</string>
     <string name="yunx_pool_password">Backup passphrase (at least 8 characters)</string>
+    <string name="yunx_pool_tab">Cloud drives</string>
+    <string name="yunx_protocol_tab">WebDAV / FTP</string>
 </resources>

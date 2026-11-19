@@ -13,6 +13,11 @@ object CloudBackupRequest {
     }
 
     @Synchronized
+    fun disarm(kind: Kind) {
+        pending.remove(kind)?.password?.fill('\u0000')
+    }
+
+    @Synchronized
     fun take(kind: Kind): CharArray? {
         val request = pending.remove(kind) ?: return null
         if (android.os.SystemClock.elapsedRealtime() > request.expiresAt) {

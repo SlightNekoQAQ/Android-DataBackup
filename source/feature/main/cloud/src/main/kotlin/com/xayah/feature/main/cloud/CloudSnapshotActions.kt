@@ -56,12 +56,16 @@ internal fun CloudSnapshotActions() {
     var candidates by remember { mutableStateOf<List<CloudBackupRepository.RemoteBackup>?>(null) }
     var selected by remember { mutableStateOf<CloudBackupRepository.RemoteBackup?>(null) }
     var verifiedFolder by remember { mutableStateOf<File?>(null) }
+    var receipt by remember(repository) { mutableStateOf(repository.lastConfirmedUpload()) }
     val failed = stringResource(R.string.yunx_job_failed)
     val empty = stringResource(R.string.yunx_no_backups)
     val complete = stringResource(R.string.yunx_upload_complete)
     val incomplete = stringResource(R.string.yunx_manifest_partial)
     val restored = stringResource(R.string.yunx_restore_path)
     Title(title = stringResource(R.string.yunx_snapshot_section)) {
+        receipt?.let {
+            Clickable(readOnly = true, title = stringResource(R.string.yunx_upload_receipt), value = it)
+        }
         Clickable(enabled = !busy, icon = Icons.Outlined.Cloud, title = stringResource(R.string.yunx_upload_local),
             desc = stringResource(R.string.yunx_upload_local_desc)) {
             message = ""
@@ -140,6 +144,7 @@ internal fun CloudSnapshotActions() {
                         val localRoot = withContext(Dispatchers.IO) { File(context.localBackupSaveDir()) }
                         message = if (action == 0) {
                             val result = repository.publish(localRoot, passphrase) { done, total -> progressUpdates.value = done to total }
+                            receipt = repository.lastConfirmedUpload()
                             if (result.missingCopies.isEmpty()) complete else incomplete
                         } else {
                             verifiedFolder = repository.restore(checkNotNull(backup), passphrase) { done, total -> progressUpdates.value = done to total }

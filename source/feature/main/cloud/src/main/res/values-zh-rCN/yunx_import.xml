@@ -29,4 +29,5 @@
     <string name="yunx_speed_result">%1$d KiB/s</string>
     <string name="yunx_job_progress">已处理 %1$d / %2$d 个文件</string>
     <string name="yunx_connections">Gopeed 下载连接数：%1$d</string>
+    <string name="yunx_upload_receipt">最近一次已确认上传的网盘快照</string>
 </resources>
