@@ -29,7 +29,13 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         try {
             sources.forEachIndexed { index, source ->
                 // The user-visible archive path lives only in the encrypted manifest.
-                entries += transfer.store(source.file, source.relativePath, "db-$id-$index.bin", targets, useManualOrder)
+                val encrypted = File.createTempFile("payload-", ".partial", privateStaging)
+                try {
+                    CloudPayload.encrypt(source.file, encrypted, passphrase, source.relativePath)
+                    entries += transfer.store(encrypted, source.relativePath, "db-$id-$index.bin", targets, useManualOrder)
+                } finally {
+                    encrypted.delete()
+                }
             }
             temporary.writeBytes(CloudManifest.encode(entries, passphrase))
             val copies = linkedMapOf<String, String>()
@@ -62,7 +68,20 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         check(staging.mkdirs())
         val transfer = CloudTransfer(drives)
         try {
-            archives.forEach { transfer.retrieve(it, staging) }
+            val incoming = File(privateStaging, "incoming-${UUID.randomUUID()}")
+            check(incoming.mkdirs())
+            try {
+                archives.forEach { archive ->
+                    val encrypted = transfer.retrieve(archive, incoming)
+                    val plain = File(staging, archive.relativePath)
+                    val parent = checkNotNull(plain.parentFile)
+                    check(parent.isDirectory || parent.mkdirs())
+                    CloudPayload.decrypt(encrypted, plain, passphrase, archive.relativePath)
+                    encrypted.delete()
+                }
+            } finally {
+                incoming.deleteRecursively()
+            }
             staging
         } catch (error: Exception) {
             staging.deleteRecursively()

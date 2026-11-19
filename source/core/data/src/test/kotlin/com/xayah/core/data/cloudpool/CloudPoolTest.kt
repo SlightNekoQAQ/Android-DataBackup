@@ -88,7 +88,7 @@ class CloudPoolTest {
         val snapshot = CloudSnapshot(listOf(first, second), temporary.newFolder())
         val manifest = snapshot.publish(
             listOf(CloudSnapshot.Source("apps/a/archive", a), CloudSnapshot.Source("apps/b/archive", b)),
-            listOf(fast.copy(freeBytes = 5), slow), passphrase,
+            listOf(fast.copy(freeBytes = 81, maxFileBytes = null), slow), passphrase,
         )
         assertEquals(setOf("fast", "slow"), manifest.manifestCopies.keys)
         assertTrue(manifest.missingCopies.isEmpty())
