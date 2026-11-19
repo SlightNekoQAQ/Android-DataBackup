@@ -155,7 +155,9 @@ class CloudBackupRepository(context: Context) {
         val found = mutableListOf<RemoteBackup>()
         for (account in accounts) {
             try {
-                CloudRecovery(listOf(account.asDrive()), staging).discover().forEach {
+                CloudRecovery(listOf(account.asDrive()), staging).discover().filter {
+                    it.remote.name.endsWith(CloudManifest.FILE_NAME)
+                }.forEach {
                     found += RemoteBackup(it.remote.name, account.account.platform, account.driveId, it.remote.id)
                 }
             } catch (error: CancellationException) {
@@ -164,7 +166,7 @@ class CloudBackupRepository(context: Context) {
                 // A wrong/expired account must not hide backups found through other accounts.
             }
         }
-        found.distinctBy { it.label.removePrefix("db-").substringBefore('-') }
+        found.distinctBy { it.label.removePrefix("db-").substringBefore("-${CloudManifest.FILE_NAME}") }
     }
 
     data class FileLocation(
@@ -189,35 +191,46 @@ class CloudBackupRepository(context: Context) {
         val manifest = CloudRecovery(listOf(manifestOwner.asDrive()), staging).readManifest(manifestOwner.driveId, backup.objectId)
         val archives = CloudManifest.decode(manifest)
         val byIdentity = allAccounts.associateBy { it.identity }
-        val entries = archives.map { archive ->
+        val contents = CloudManifest.decodeContents(manifest)
+        val entries = contents.archives.map { archive ->
             val requiredIdentity = archive.accountIdentity
             val account = byIdentity[requiredIdentity]
             FileLocation(archive.relativePath, requiredIdentity.substringBefore(':'), account?.account?.nickname.orEmpty(),
                 null, account?.folder?.let { "/backup" }.orEmpty(), requiredIdentity, account != null)
         }
-        SnapshotContents(entries, archives.map { it.accountIdentity }.toSet() - byIdentity.keys)
+        SnapshotContents(entries, contents.archives.map { it.accountIdentity }.toSet() - byIdentity.keys)
     }
 
-    data class RestoreResult(val folder: File, val missing: List<CloudArchive>)
+    data class RestoreResult(val folder: File, val missing: List<CloudArchive>, val unavailableEntries: List<String> = emptyList(), val unverifiablePlatforms: Set<String> = emptySet())
 
     /** Restore only payloads whose verified account is present; report the rest to the caller. */
-    suspend fun restoreAvailable(backup: RemoteBackup, onProgress: (Int, Int) -> Unit = { _, _ -> }): RestoreResult = withContext(Dispatchers.IO) {
+    suspend fun restoreAvailable(backup: RemoteBackup, onProgress: (Int, Int) -> Unit = { _, _ -> }): RestoreResult = restoreAvailable(backup, null, onProgress)
+
+    suspend fun restoreAvailable(backup: RemoteBackup, selectedEntries: Set<String>?, onProgress: (Int, Int) -> Unit = { _, _ -> }): RestoreResult = withContext(Dispatchers.IO) {
         val allAccounts = configured(includeLegacy = true)
         val manifestOwner = allAccounts.singleOrNull { it.driveId == backup.accountKey }
             ?: throw IOException("The account containing this backup index is not connected")
         val accounts = allAccounts
         val manifest = CloudRecovery(listOf(manifestOwner.asDrive()), staging).readManifest(manifestOwner.driveId, backup.objectId)
-        val archives = CloudManifest.decode(manifest)
+        val decoded = CloudManifest.decodeContents(manifest)
+        val selectedPaths = selectedEntries?.mapNotNull { selected -> decoded.entries.firstOrNull { it.path == selected }?.path }?.toSet()
+        require(selectedEntries == null || selectedPaths == selectedEntries) { "Selected backup entry is not present in the index" }
+        val selectedItemPaths = selectedPaths?.map { it.trimEnd('/') + "/" }
+        val relevantArchives = if (selectedItemPaths == null) decoded.archives else decoded.archives.filter { archive ->
+            selectedItemPaths.any { archive.relativePath.startsWith(it) }
+        }
         val byIdentity = accounts.associateBy { it.identity }
-        val missing = archives.filter { it.accountIdentity !in byIdentity }
-        val accessibleArchives = archives.filter { it.accountIdentity in byIdentity }
+        val availableByIdentity = byIdentity.filterValues { !it.identity.contains(":unverified:") }
+        val missing = relevantArchives.filter { it.accountIdentity !in availableByIdentity }
+        val wrongAccounts = accounts.filter { it.identity.contains(":unverified:") }.map { it.account.platform }.toSet()
+        val accessibleArchives = relevantArchives.filter { it.accountIdentity in availableByIdentity }
         val accessibleDrives = accessibleArchives.map { archive ->
-            byIdentity.getValue(archive.accountIdentity).asDrive()
+            availableByIdentity.getValue(archive.accountIdentity).asDrive()
         }.distinctBy { it.accountId }
         // The manifest identifies accounts by stable provider identity. Translate to this
         // device's current provider folder handles for actual object downloads.
         val routedArchives = accessibleArchives.map { archive ->
-            archive.copy(accountId = byIdentity.getValue(archive.accountIdentity).driveId)
+            archive.copy(accountId = availableByIdentity.getValue(archive.accountIdentity).driveId)
         }
         if (accessibleArchives.isEmpty()) {
             check(staging.isDirectory || staging.mkdirs())
@@ -227,11 +240,71 @@ class CloudBackupRepository(context: Context) {
         }
         val accessibleIndex = CloudManifest.encode(routedArchives)
         val retrieval = CloudSnapshot(accessibleDrives, staging).retrieveAvailable(accessibleIndex, onProgress)
-        RestoreResult(retrieval.folder, missing + retrieval.unavailable)
+        val failedPaths = (missing + retrieval.unavailable).map { it.relativePath }.toSet()
+        val unavailableEntries = selectedPaths.orEmpty().flatMap { selected ->
+            decoded.entries.filter { entry ->
+                entry.path == selected && failedPaths.any { path -> path == entry.archive || path.startsWith("${entry.path}/") }
+            }.map { it.displayName }
+        }
+        RestoreResult(retrieval.folder, missing + retrieval.unavailable, unavailableEntries, wrongAccounts)
     }
 
     suspend fun restore(backup: RemoteBackup, onProgress: (Int, Int) -> Unit = { _, _ -> }): File =
         restoreAvailable(backup, onProgress).folder
+
+    data class BackupContents(val archives: List<CloudArchive>, val entries: List<CloudManifest.BackupEntry>, val missingAccounts: Set<String>)
+
+    suspend fun backupContents(backup: RemoteBackup): BackupContents = withContext(Dispatchers.IO) {
+        val accounts = configured(includeLegacy = true)
+        val owner = accounts.singleOrNull { it.driveId == backup.accountKey }
+            ?: throw IOException("Backup index account is not connected")
+        val contents = CloudManifest.decodeContents(CloudRecovery(listOf(owner.asDrive()), staging).readManifest(owner.driveId, backup.objectId))
+        val verifiedAccounts = accounts.filter { !it.identity.contains(":unverified:") }
+        val connected = verifiedAccounts.map { it.identity }.toSet()
+        val missingIdentities = contents.archives.map { it.accountIdentity }.toSet() - connected
+        val wrongAccountPlatforms = missingIdentities.map { it.substringBefore(':') }.filter { provider ->
+            verifiedAccounts.any { it.account.platform == provider }
+        }.toSet()
+        val missing = missingIdentities.filter { it.substringBefore(':') !in wrongAccountPlatforms }.toSet()
+        BackupContents(contents.archives, contents.entries, missing + wrongAccountPlatforms.map { "$it:wrong-account" })
+    }
+
+    suspend fun contents(backup: RemoteBackup): CloudManifest.Contents = backupContents(backup).let {
+        CloudManifest.Contents(it.archives, it.entries)
+    }
+
+    suspend fun discoverBackups(): List<RemoteBackup> = available()
+
+    suspend fun selectedRestoreFolder(folder: File, entries: List<CloudManifest.BackupEntry>, selected: Set<String>): File = withContext(Dispatchers.IO) {
+        val root = folder.canonicalFile
+        val stagingRoot = staging.canonicalFile
+        require(root.path.startsWith(stagingRoot.path + File.separator))
+        val selectedEntries = entries.filter { it.path in selected }
+        val indexFiles = selectedEntries.map { it.archive }.toSet()
+        listOf("apps" to "package_restore_config.json", "files" to "media_restore_config.json").forEach { (category, name) ->
+            File(root, category).walkTopDown().filter { it.isFile && it.name == name }
+                .filter { it.relativeTo(root).invariantSeparatorsPath !in indexFiles }.forEach { it.delete() }
+        }
+        val apps = selectedEntries.filter { it.kind == "app" }
+        val files = selectedEntries.filter { it.kind == "file" }
+        val appDir = File(root, "apps")
+        val fileDir = File(root, "files")
+        appDir.mkdirs()
+        fileDir.mkdirs()
+        apps.forEach { File(appDir, it.path.removePrefix("apps/")).mkdirs() }
+        files.forEach { File(fileDir, it.path.removePrefix("files/")).mkdirs() }
+        val appRoots = entries.filter { it.kind == "app" }.map { it.path.removePrefix("apps/") }.toSet()
+        val fileRoots = entries.filter { it.kind == "file" }.map { it.path.removePrefix("files/") }.toSet()
+        appRoots.forEach { relative -> File(appDir, relative).mkdirs() }
+        fileRoots.forEach { relative -> File(fileDir, relative).mkdirs() }
+        selectedEntries.forEach { entry ->
+            val source = File(root, entry.archive).canonicalFile
+            require(source.path.startsWith(root.path + File.separator) && source.isFile) { "Selected item index was not downloaded" }
+            require(source == File(root, entry.archive).canonicalFile)
+        }
+        root
+    }
+
 
     private fun collect(root: File, directory: File): List<CloudSnapshot.Source> {
         if (directory.absoluteFile != directory.canonicalFile) throw IOException("Backup path is not a regular directory")

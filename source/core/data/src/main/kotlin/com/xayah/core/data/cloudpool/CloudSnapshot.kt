@@ -31,6 +31,7 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
             val drive = drives.single { it.accountId == accountId }
             return (drive as? YunxCloudDrive)?.verifiedAccountIdentity() ?: accountId
         }
+        private val backupContents = mutableListOf<CloudManifest.BackupEntry>()
         private var finished = false
         private var failed = false
 
@@ -42,6 +43,22 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
                 // The user-visible archive path lives in the index; payloads stay flat and opaque.
                 val uploaded = transfer.store(source.file, source.relativePath, "db-$id-${entries.size}.bin", targets, manual)
                 entries += uploaded.copy(accountIdentity = identity(uploaded.accountId))
+                val appConfig = source.relativePath.takeIf { it.startsWith("apps/") && it.endsWith("/package_restore_config.json") }
+                val fileConfig = source.relativePath.takeIf { it.startsWith("files/") && it.endsWith("/media_restore_config.json") }
+                val configPath = appConfig ?: fileConfig
+                if (configPath != null) {
+                    val kind = if (appConfig != null) "app" else "file"
+                    val path = configPath.removeSuffix(if (appConfig != null) "/package_restore_config.json" else "/media_restore_config.json")
+                    val json = runCatching { com.google.gson.JsonParser.parseString(source.file.readText()).asJsonObject }.getOrNull()
+                    val displayName = if (kind == "app") {
+                        runCatching { json?.getAsJsonObject("packageInfo")?.get("label")?.asString }.getOrNull()
+                    } else {
+                        runCatching { json?.getAsJsonObject("indexInfo")?.get("name")?.asString }.getOrNull()
+                    }?.takeIf(String::isNotBlank) ?: path.substringAfterLast('/')
+                    val packageName = runCatching { json?.getAsJsonObject("indexInfo")?.get("packageName")?.asString }.getOrNull()
+                    val itemName = if (kind == "app" && !packageName.isNullOrBlank()) "$displayName ($packageName)" else displayName
+                    backupContents += CloudManifest.BackupEntry(path, kind, itemName, configPath)
+                }
                 afterConfirmedUpload()
             } catch (error: CancellationException) {
                 failed = true
@@ -52,13 +69,13 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
             }
         }
 
-        suspend fun finish(): Published = withContext(Dispatchers.IO) {
+        suspend fun finish(contents: List<CloudManifest.BackupEntry> = backupContents): Published = withContext(Dispatchers.IO) {
             check(!finished && !failed && entries.isNotEmpty())
             finished = true
             check(privateStaging.isDirectory || privateStaging.mkdirs() || privateStaging.isDirectory)
             val temporary = File.createTempFile("index-", ".partial", privateStaging)
             try {
-                temporary.writeBytes(CloudManifest.encode(entries))
+                temporary.writeBytes(CloudManifest.encode(entries, contents))
                 val copies = linkedMapOf<String, String>()
                 val missing = linkedSetOf<String>()
                 // Replicate the complete recovery index to every participating drive. Payloads

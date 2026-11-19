@@ -147,12 +147,16 @@ class CloudPoolTest {
 
     @Test fun manifestRoundTripsAndRejectsDuplicates() {
         val entry = CloudArchive("apps/app/archive", "account", "file", 42, "a".repeat(64), "verified-account")
-        val encoded = CloudManifest.encode(listOf(entry))
-        assertEquals(listOf(entry), CloudManifest.decode(encoded))
+        val metadata = CloudManifest.BackupEntry("apps/app/user_0", "app", "Example app", "apps/app/user_0/package_restore_config.json")
+        val configArchive = CloudArchive(metadata.archive, "account", "config", 10, "b".repeat(64), "verified-account")
+        val encoded = CloudManifest.encode(listOf(entry, configArchive), listOf(metadata))
+        assertEquals(listOf(entry, configArchive), CloudManifest.decode(encoded))
+        assertEquals(listOf(metadata), CloudManifest.decodeContents(encoded).entries
         assertTrue(String(encoded, Charsets.UTF_8).contains("verified-account"))
         // The index is plain JSON on purpose: recovery must not require a user-supplied secret.
         assertTrue(String(encoded, Charsets.UTF_8).contains("databackup-cloud-index"))
         assertThrows(IllegalArgumentException::class.java) { CloudManifest.encode(listOf(entry, entry)) }
+        assertThrows(IllegalArgumentException::class.java) { CloudManifest.encode(listOf(entry), listOf(metadata)) }
         assertThrows(IllegalArgumentException::class.java) {
             CloudManifest.decode("""{"format":"other","version":1,"items":[]}""".toByteArray())
         }

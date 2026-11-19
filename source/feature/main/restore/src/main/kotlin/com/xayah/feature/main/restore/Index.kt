@@ -1,6 +1,7 @@
 package com.xayah.feature.main.restore
 
 import android.annotation.SuppressLint
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -120,20 +121,75 @@ fun PageRestore() {
             }
 
             if (uiState.storageIndex == 2) {
-                var indexed by remember { mutableStateOf<Pair<String, List<Target>>?>(null) }
+                var backups by remember { mutableStateOf<List<com.xayah.core.data.cloudpool.CloudBackupRepository.RemoteBackup>>(emptyList()) }
+                var selected by remember { mutableStateOf<com.xayah.core.data.cloudpool.CloudBackupRepository.RemoteBackup?>(null) }
+                var entries by remember { mutableStateOf<List<com.xayah.core.data.cloudpool.CloudManifest.BackupEntry>>(emptyList()) }
+                var unavailableAccounts by remember { mutableStateOf<Set<String>>(emptySet()) }
+                var unverifiablePlatforms by remember { mutableStateOf<Set<String>>(emptySet()) }
+                var chosen by remember { mutableStateOf<Set<String>>(emptySet()) }
                 var missing by remember { mutableStateOf<List<String>>(emptyList()) }
-                com.xayah.feature.main.cloud.CloudSnapshotActions(
-                    uploadEnabled = false,
-                    onRestore = { folder -> indexed = folder.canonicalPath to viewModel.indexCloudSnapshot(folder) },
-                    onMissing = { unavailable -> missing = unavailable.map { it.relativePath }.distinct() },
-                )
-                if (missing.isNotEmpty()) {
-                    Clickable(readOnly = true, title = "部分项目未下载：${missing.joinToString()}（所需网盘账号未连接或档案不可用）")
+                var busy by remember { mutableStateOf(false) }
+                var error by remember { mutableStateOf<String?>(null) }
+                val context = LocalContext.current.applicationContext
+                val cloudRepo = remember(context) { com.xayah.core.data.cloudpool.CloudBackupRepository(context) }
+                val scope = rememberCoroutineScope()
+                LaunchedEffect(Unit) {
+                    busy = true
+                    scope.launch {
+                        runCatching { cloudRepo.discoverBackups() }
+                            .onSuccess { backups = it }
+                            .onFailure { error = it.message ?: "读取网盘备份失败" }
+                        busy = false
+                    }
                 }
-                indexed?.let { (path, targets) ->
-                    targets.forEach { target ->
-                        Clickable(title = stringResource(if (target == Target.Apps) R.string.apps else R.string.files)) {
-                            navController.navigateSingle(MainRoutes.List.getRoute(target, OpType.RESTORE, backupDir = path.encodeURL()))
+                if (busy) Clickable(readOnly = true, title = "正在读取网盘备份…")
+                error?.let { Clickable(readOnly = true, title = it) }
+                backups.forEach { backup ->
+                    Clickable(title = backup.label.removePrefix("db-").substringBefore("-${com.xayah.core.data.cloudpool.CloudManifest.FILE_NAME}"), value = backup.provider, enabled = !busy) {
+                        scope.launch {
+                            busy = true
+                            selected = backup
+                            runCatching { cloudRepo.backupContents(backup) }
+                                .onSuccess { content ->
+                                    entries = content.entries
+                                    unavailableAccounts = content.missingAccounts.filterNot { it.endsWith(":wrong-account") }.toSet()
+                                    unverifiablePlatforms = content.missingAccounts.filter { it.endsWith(":wrong-account") }.map { it.removeSuffix(":wrong-account") }.toSet()
+                                    chosen = content.entries.map { it.path }.toSet()
+                                    missing = emptyList()
+                                }
+                                .onFailure { error = it.message ?: "读取备份索引失败" }
+                            busy = false
+                        }
+                    }
+                }
+                selected?.let { backup ->
+                    Text("已选择：${backup.label}")
+                    entries.forEach { entry ->
+                        val checked = entry.path in chosen
+                        Clickable(title = "${if (entry.kind == "app") "应用" else "文件"} · ${entry.displayName}", value = if (checked) "已选择" else "未选择") {
+                            chosen = if (checked) chosen - entry.path else chosen + entry.path
+                        }
+                    }
+                    if (unavailableAccounts.isNotEmpty()) Clickable(readOnly = true, title = "缺少网盘账号：${unavailableAccounts.joinToString()}")
+                    if (unverifiablePlatforms.isNotEmpty()) Clickable(readOnly = true, title = "账号身份验证失败的网盘：${unverifiablePlatforms.joinToString()}，请重新从 YunX 导入正确账号")
+                    if (missing.isNotEmpty()) Clickable(readOnly = true, title = "未恢复：${missing.joinToString()}")
+                    Clickable(enabled = !busy && chosen.isNotEmpty(), title = if (busy) "正在恢复…" else "恢复所选项目") {
+                        scope.launch {
+                            busy = true
+                            runCatching { cloudRepo.restoreAvailable(backup, chosen) }
+                                .onSuccess { result ->
+                                    missing = result.unavailableEntries + result.missing.map { it.relativePath }.distinct()
+                                    unverifiablePlatforms = result.unverifiablePlatforms
+                                    val selectedFolder = cloudRepo.selectedRestoreFolder(result.folder, entries, chosen)
+                                    runCatching { viewModel.indexCloudSnapshot(selectedFolder) }
+                                        .onFailure { error = it.message ?: "索引已下载项目失败" }
+                                        .onSuccess { targets ->
+                                            val selectedTargets = entries.filter { it.path in chosen }.map { if (it.kind == "app") Target.Apps else Target.Files }.distinct()
+                                            selectedTargets.forEach { target -> if (target in targets) navController.navigateSingle(MainRoutes.List.getRoute(target, OpType.RESTORE, backupDir = selectedFolder.canonicalPath.encodeURL())) }
+                                        }
+                                }
+                                .onFailure { error = it.message ?: "下载云盘备份失败" }
+                            busy = false
                         }
                     }
                 }
