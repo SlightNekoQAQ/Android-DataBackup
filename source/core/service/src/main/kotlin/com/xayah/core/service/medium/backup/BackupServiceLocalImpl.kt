@@ -1,6 +1,10 @@
 package com.xayah.core.service.medium.backup
 
+import com.xayah.core.data.cloudpool.CloudBackupRepository
+import com.xayah.core.data.cloudpool.CloudBackupRequest
 import com.xayah.core.data.repository.MediaRepository
+import com.xayah.core.model.OperationState
+import java.io.File
 import com.xayah.core.data.repository.TaskRepository
 import com.xayah.core.database.dao.MediaDao
 import com.xayah.core.database.dao.TaskDao
@@ -62,6 +66,30 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
 
     @Inject
     override lateinit var mMediumBackupUtil: MediumBackupUtil
+
+    private var cloudPassword: CharArray? = null
+
+    override suspend fun onTargetDirsCreated() {
+        cloudPassword = CloudBackupRequest.take(CloudBackupRequest.Kind.FILES)
+    }
+
+    override fun onDestroy() {
+        cloudPassword?.fill('\u0000')
+        cloudPassword = null
+        super.onDestroy()
+    }
+
+    override suspend fun clear() {
+        val password = cloudPassword ?: return
+        cloudPassword = null
+        try {
+            val folders = mMediaEntities.filter { it.state == OperationState.DONE }
+                .map { "files/${it.mediaEntity.archivesRelativeDir}" }.toSet()
+            require(folders.isNotEmpty()) { "No completed file backups to upload" }
+            val result = CloudBackupRepository(mContext).publish(File(mRootDir), password, folders)
+            check(result.missingCopies.isEmpty()) { "Not all cloud recovery indexes could be uploaded" }
+        } finally { password.fill('\u0000') }
+    }
 
     override val mRootDir by lazy { mContext.localBackupSaveDir() }
     override val mFilesDir by lazy { mPathUtil.getLocalBackupFilesDir() }

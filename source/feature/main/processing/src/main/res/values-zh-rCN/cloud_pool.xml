@@ -1,0 +1,6 @@
+<resources>
+    <string name="yunx_start_backup">备份到网盘容量池</string>
+    <string name="yunx_start_backup_desc">打包选中的项目，随后加密并上传到已配置的网盘。</string>
+    <string name="yunx_setup_destination">请先导入账号并选择网盘备份目录。</string>
+    <string name="yunx_pool_password">备份口令（至少 8 位）</string>
+</resources>

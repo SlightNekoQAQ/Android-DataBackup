@@ -1,6 +1,10 @@
 package com.xayah.core.service.packages.backup
 
+import com.xayah.core.data.cloudpool.CloudBackupRepository
+import com.xayah.core.data.cloudpool.CloudBackupRequest
 import com.xayah.core.data.repository.PackageRepository
+import com.xayah.core.model.OperationState
+import java.io.File
 import com.xayah.core.data.repository.TaskRepository
 import com.xayah.core.database.dao.PackageDao
 import com.xayah.core.database.dao.TaskDao
@@ -67,6 +71,30 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
 
     @Inject
     override lateinit var mPackagesBackupUtil: PackagesBackupUtil
+
+    private var cloudPassword: CharArray? = null
+
+    override suspend fun onTargetDirsCreated() {
+        cloudPassword = CloudBackupRequest.take(CloudBackupRequest.Kind.APPS)
+    }
+
+    override fun onDestroy() {
+        cloudPassword?.fill('\u0000')
+        cloudPassword = null
+        super.onDestroy()
+    }
+
+    override suspend fun clear() {
+        val password = cloudPassword ?: return
+        cloudPassword = null
+        try {
+            val folders = mPkgEntities.filter { it.state == OperationState.DONE }
+                .map { "apps/${it.packageEntity.archivesRelativeDir}" }.toSet()
+            require(folders.isNotEmpty()) { "No completed application backups to upload" }
+            val result = CloudBackupRepository(mContext).publish(File(mRootDir), password, folders)
+            check(result.missingCopies.isEmpty()) { "Not all cloud recovery indexes could be uploaded" }
+        } finally { password.fill('\u0000') }
+    }
 
     override val mRootDir by lazy { mContext.localBackupSaveDir() }
     override val mAppsDir by lazy { mPathUtil.getLocalBackupAppsDir() }

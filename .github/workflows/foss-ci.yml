@@ -31,13 +31,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Prepare verified Gopeed kernels
         run: bash core/network/gopeed-kernel.sh
-      - name: Test cloud backup core
-        run: bash ./gradlew --no-daemon :core:data:testDebugUnitTest
-      - name: Build installable FOSS debug APKs
+      - name: Test cloud backup core and build installable APKs
+        shell: bash
         run: |
-          bash ./gradlew --no-daemon \
-            assembleArm64-v8aFossDebug assembleArmeabi-v7aFossDebug \
-            assembleX86FossDebug assembleX86_64FossDebug
+          tasks=(assembleArm64-v8aFossDebug)
+          if [[ "$GITHUB_REF" == refs/heads/cloud-backup ]]; then
+            tasks+=(assembleArmeabi-v7aFossDebug assembleX86FossDebug assembleX86_64FossDebug)
+          fi
+          bash ./gradlew --no-daemon :core:data:testDebugUnitTest "${tasks[@]}"
       - uses: actions/upload-artifact@v4
         with:
           name: DataBackup-FOSS-debug-${{ github.sha }}

@@ -130,6 +130,13 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
             }
 
             Title(title = stringResource(id = R.string.storage)) {
+                if (uiState.storageType == StorageMode.Local) {
+                    com.xayah.feature.main.processing.CloudPoolBackupOption(
+                        kind = com.xayah.core.data.cloudpool.CloudBackupRequest.Kind.APPS,
+                        onStart = { viewModel.emitIntentOnIO(FinishSetup(navController = localNavController)) },
+                        onConfigure = { navController.navigateSingle(MainRoutes.Cloud.route) },
+                    )
+                }
                 AnimatedVisibility(uiState.storageIndex == 1) {
                     if (accounts.isEmpty()) {
                         Clickable(

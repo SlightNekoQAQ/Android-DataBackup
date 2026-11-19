@@ -27,11 +27,14 @@ class CloudBackupRepository(context: Context) {
 
     private fun Configured.asDrive() = YunxCloudDrive(context, account, key, folder, preferences.connections(slot))
 
-    suspend fun publish(localRoot: File, password: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): CloudSnapshot.Published = withContext(Dispatchers.IO) {
+    fun hasDestinations(): Boolean = configured().isNotEmpty()
+
+    suspend fun publish(localRoot: File, password: CharArray, folders: Set<String>? = null, onProgress: (Int, Int) -> Unit = { _, _ -> }): CloudSnapshot.Published = withContext(Dispatchers.IO) {
         val accounts = configured()
         require(accounts.isNotEmpty()) { "Select a backup folder on at least one cloud account" }
         val root = localRoot.canonicalFile
-        val sources = listOf("apps", "files", "configs").flatMap { category ->
+        val sources = (folders ?: setOf("apps", "files", "configs")).flatMap { category ->
+            validateRelativePath(category)
             val base = File(root, category)
             if (!base.isDirectory) emptyList() else collect(root, base)
         }
