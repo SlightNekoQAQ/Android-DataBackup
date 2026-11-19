@@ -83,7 +83,7 @@ abstract class AbstractProcessingServiceProxy {
         }
     }
 
-    protected open fun configure(service: AbstractProcessingService) {}
+    internal open fun configure(service: AbstractProcessingService) {}
 
     suspend fun initialize(): Long = getService().let { service ->
         configure(service)

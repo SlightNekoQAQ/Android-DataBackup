@@ -13,7 +13,7 @@ class ProcessingServiceProxyLocalImpl @Inject constructor() : AbstractProcessing
 
     var backupRoot: String? = null
 
-    override fun configure(service: com.xayah.core.service.AbstractProcessingService) {
+    internal override fun configure(service: com.xayah.core.service.AbstractProcessingService) {
         (service as RestoreServiceLocalImpl).backupRoot = backupRoot
     }
 
