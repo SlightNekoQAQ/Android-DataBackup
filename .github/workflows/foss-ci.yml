@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [cloud-backup]
   push:
-    branches: [cloud-backup]
+    branches: [cloud-backup, 'feature/cloud-pool']
   workflow_dispatch:
 
 permissions:
@@ -29,6 +29,8 @@ jobs:
           distribution: zulu
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Test cloud backup core
+        run: bash ./gradlew --no-daemon :core:data:testDebugUnitTest
       - name: Build installable FOSS debug APKs
         run: |
           bash ./gradlew --no-daemon \

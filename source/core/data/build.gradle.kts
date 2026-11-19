@@ -12,6 +12,8 @@ android {
 }
 
 dependencies {
+    testImplementation(libs.junit)
+
     // Core
     implementation(project(":core:common"))
     implementation(project(":core:database"))

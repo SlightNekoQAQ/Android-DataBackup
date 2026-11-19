@@ -17,6 +17,8 @@ dependencies {
 
     // OkHttp
     implementation(libs.okhttp)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.kotlinx.coroutines.core.jvm)
 
     // Retrofit
     implementation(libs.retrofit)
