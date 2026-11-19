@@ -36,6 +36,7 @@ class CloudPoolTest {
         val session = CloudTransfer(listOf(first, second))
         val archive = immediate { session.store(source, "apps/app/archive", "archive", listOf(slow, fast)) }
         assertEquals("slow", archive.accountId)
+        assertEquals("slow", archive.accountIdentity)
         assertEquals(1, first.uploads)
         assertEquals(1, second.uploads)
         val freshSession = CloudTransfer(listOf(second))

@@ -64,7 +64,7 @@ class CloudTransfer(drives: Collection<CloudDrive>) {
             }
             check(id.isNotBlank()) { "Upload returned no file reference" }
             sessionBytes[target.accountId] = newTotal
-            return CloudArchive(relativePath, target.accountId, id, size, digest, target.accountId)
+            return CloudArchive(relativePath, target.accountId, id, size, digest)
         }
         throw CloudCapacityException("No writable cloud account can fit this archive")
     }
