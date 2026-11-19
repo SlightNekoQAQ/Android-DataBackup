@@ -9,6 +9,7 @@ import java.util.Locale
 /** The driver must return a durable, private file reference after the provider commits the upload. */
 interface CloudDrive {
     val accountId: String
+    suspend fun listObjects(): List<CloudRecovery.RemoteObject>
     suspend fun upload(source: File, remoteName: String): String
     suspend fun download(fileId: String, destination: File)
 }

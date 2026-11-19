@@ -49,6 +49,9 @@ class YunxCloudDrive(
             "空间已满", "容量已满", "存储空间已用完", "超过单文件", "单文件最大", "文件大小超出").any(text::contains)
     }
 
+    override suspend fun listObjects(): List<CloudRecovery.RemoteObject> = drive.list(directoryId)
+        .filterNot { it.isdir }.map { CloudRecovery.RemoteObject(it.fid, it.fname, it.fsize) }
+
     override suspend fun download(fileId: String, destination: File) {
         val file = drive.list(directoryId).singleOrNull { it.fid == fileId && !it.isdir }
             ?: throw IOException("Archive is missing in its cloud directory")

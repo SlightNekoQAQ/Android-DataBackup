@@ -55,8 +55,14 @@ class CloudPoolTest {
         assertEquals(1, second.uploads)
     }
 
-    private class MemoryDrive(override val accountId: String, private val failure: IOException? = null) : CloudDrive {
-        val objects = mutableMapOf<String, ByteArray>()
+    private class MemoryDrive(
+        override val accountId: String,
+        private val failure: IOException? = null,
+        val objects: MutableMap<String, ByteArray> = mutableMapOf(),
+    ) : CloudDrive {
+        override suspend fun listObjects() = objects.map { (name, bytes) ->
+            CloudRecovery.RemoteObject(name, name, bytes.size.toLong())
+        }
         var uploads = 0
         override suspend fun upload(source: File, remoteName: String): String {
             uploads++
@@ -102,13 +108,26 @@ class CloudPoolTest {
         assertTrue(manifest.missingCopies.isEmpty())
         val bytes = first.objects.getValue(manifest.manifestCopies.getValue("fast"))
         assertTrue(bytes.contentEquals(second.objects.getValue(manifest.manifestCopies.getValue("slow"))))
+        // Simulate a new device: fresh adapters and staging, with only the two remote object stores.
+        val recovery = CloudRecovery(listOf(MemoryDrive("slow", objects = second.objects),
+            MemoryDrive("fast", objects = first.objects)), temporary.newFolder())
+        val references = recovery.discover()
+        assertEquals(2, references.size)
+        val selected = references.first()
         val progress = mutableListOf<Pair<Int, Int>>()
-        val restored = CloudSnapshot(listOf(second, first), temporary.newFolder()).retrieve(bytes, passphrase) { done, total ->
+        val restored = recovery.restore(selected.accountId, selected.remote.id, passphrase) { done, total ->
             progress += done to total
         }
         assertEquals(listOf(0 to 2, 1 to 2, 2 to 2), progress)
         assertEquals("first", File(restored, "apps/a/archive").readText())
         assertEquals("second", File(restored, "apps/b/archive").readText())
+        val missingDrive = CloudRecovery(listOf(MemoryDrive("slow", objects = second.objects)), temporary.newFolder())
+        val missing = runCatching { missingDrive.restore(selected.accountId, selected.remote.id, passphrase) }
+        assertTrue(missing.exceptionOrNull() is IOException)
+        val objectToDamage = first.objects.keys.single { !it.endsWith(CloudManifest.FILE_NAME) }
+        first.objects.getValue(objectToDamage)[0] = 0
+        val corrupt = runCatching { recovery.restore(selected.accountId, selected.remote.id, passphrase) }
+        assertTrue(corrupt.exceptionOrNull() is IOException)
     }
 
     @Test fun failedArchiveIsKeptAndIncompleteSnapshotCannotBePublished() = runBlocking {

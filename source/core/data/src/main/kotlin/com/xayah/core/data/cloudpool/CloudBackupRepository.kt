@@ -129,28 +129,17 @@ class CloudBackupRepository(context: Context) {
     suspend fun available(): List<RemoteBackup> = withContext(Dispatchers.IO) {
         if (configured().isEmpty()) prepareDestinations()
         val accounts = configured(includeLegacy = true)
-        val backups = mutableListOf<RemoteBackup>()
-        var successfulListings = 0
-        for (account in accounts) {
-            try {
-                val entries = account.account.personalDrive(context).list(account.folder)
-                backups += entries.filter { it.isManifest() && it.fsize in 1..MAX_MANIFEST }
-                    .map { RemoteBackup(it.fname, account.account.platform, account.key, it.fid) }
-                successfulListings++
-            } catch (error: CancellationException) {
-                throw error
-            } catch (_: Exception) {
-                // One failed account must not hide manifests from all other accounts.
-            }
+        val providers = accounts.associate { it.key to it.account.platform }
+        CloudRecovery(accounts.map { it.asDrive() }, staging).discover().map {
+            RemoteBackup(it.remote.name, providers.getValue(it.accountId), it.accountId, it.remote.id)
         }
-        if (accounts.isNotEmpty() && successfulListings == 0) throw IOException("Cannot list any configured backup folder")
-        backups
     }
 
     data class FileLocation(val original: String, val provider: String, val account: String, val remoteName: String?, val folder: String)
 
     suspend fun locations(backup: RemoteBackup, password: CharArray): List<FileLocation> = withContext(Dispatchers.IO) {
-        val (accounts, manifest) = readManifest(backup)
+        val accounts = configured(includeLegacy = true)
+        val manifest = CloudRecovery(accounts.map { it.asDrive() }, staging).readManifest(backup.accountKey, backup.objectId)
         val archives = CloudManifest.decode(manifest, password)
         val locations = mutableMapOf<String, Map<String, String>>()
         for (account in accounts.filter { target -> archives.any { it.accountId == target.key } }) {
@@ -172,25 +161,8 @@ class CloudBackupRepository(context: Context) {
     }
 
     suspend fun restore(backup: RemoteBackup, password: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
-        val (accounts, manifest) = readManifest(backup)
-        CloudSnapshot(accounts.map { it.asDrive() }, staging).retrieve(manifest, password, onProgress)
-    }
-
-    private suspend fun readManifest(backup: RemoteBackup): Pair<List<Configured>, ByteArray> {
-        val accounts = configured(includeLegacy = true)
-        val source = accounts.singleOrNull { it.key == backup.accountKey } ?: throw IOException("Backup account is not configured")
-        val remote = source.account.personalDrive(context).list(source.folder).singleOrNull { it.fid == backup.objectId && it.isManifest() }
-            ?: throw IOException("Backup manifest is missing")
-        if (remote.fsize !in 1..MAX_MANIFEST) throw IOException("Invalid backup manifest size")
-        check(staging.isDirectory || staging.mkdirs())
-        val temp = File.createTempFile("index-", ".partial", staging)
-        return try {
-            source.asDrive().download(remote.fid, temp)
-            if (temp.length() != remote.fsize) throw IOException("Incomplete backup manifest")
-            accounts to temp.readBytes()
-        } finally {
-            temp.delete()
-        }
+        val drives = configured(includeLegacy = true).map { it.asDrive() }
+        CloudRecovery(drives, staging).restore(backup.accountKey, backup.objectId, password, onProgress)
     }
 
     private fun collect(root: File, directory: File): List<CloudSnapshot.Source> {
@@ -213,10 +185,7 @@ class CloudBackupRepository(context: Context) {
         return result.sortedBy { it.relativePath }
     }
 
-    private fun ShareFile.isManifest() = !isdir && fname.startsWith("db-") && fname.endsWith(CloudManifest.FILE_NAME)
-
     private companion object {
         const val DEFAULT_FOLDER = "backup"
-        const val MAX_MANIFEST = 8L * 1024 * 1024
     }
 }
