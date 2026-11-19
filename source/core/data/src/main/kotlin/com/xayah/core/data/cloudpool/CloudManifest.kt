@@ -2,59 +2,35 @@ package com.xayah.core.data.cloudpool
 
 import com.google.gson.Gson
 import com.google.gson.annotations.SerializedName
-import java.security.GeneralSecurityException
-import java.security.SecureRandom
-import javax.crypto.Cipher
-import javax.crypto.SecretKeyFactory
-import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.PBEKeySpec
-import javax.crypto.spec.SecretKeySpec
 
-/** Authenticated cloud index. The caller uploads this only after all payloads are committed. */
+/**
+ * Portable cloud index. It is stored in the clear on purpose: recovery must not depend on a
+ * separate passphrase typed by the user, only on the cloud account that already holds the data.
+ * It contains no credentials and no signed download URLs.
+ */
 object CloudManifest {
-    const val FILE_NAME = "databackup-manifest-v1.bin"
-    private val header = "DBPOOL01".toByteArray(Charsets.US_ASCII)
-    private const val saltSize = 16
-    private const val ivSize = 12
-    private const val tagSize = 16
+    const val FILE_NAME = "databackup-manifest-v1.json"
+    private const val FORMAT = "databackup-cloud-index"
+    private const val VERSION = 1
     private const val maximumSize = 8 * 1024 * 1024
-    private val random = SecureRandom()
     private val gson = Gson()
 
-    fun encode(archives: List<CloudArchive>, passphrase: CharArray): ByteArray {
-        require(passphrase.size >= 8) { "Backup passphrase must contain at least 8 characters" }
+    fun encode(archives: List<CloudArchive>): ByteArray {
         validate(archives)
-        val plain = gson.toJson(archives.map(::WireArchive)).toByteArray(Charsets.UTF_8)
-        try {
-            require(plain.size <= maximumSize - header.size - saltSize - ivSize - tagSize)
-            val salt = ByteArray(saltSize).also(random::nextBytes)
-            val iv = ByteArray(ivSize).also(random::nextBytes)
-            return header + salt + iv + cipher(Cipher.ENCRYPT_MODE, passphrase, salt, iv).doFinal(plain)
-        } finally {
-            plain.fill(0)
-        }
+        val bytes = gson.toJson(Document(FORMAT, VERSION, archives.map(::WireArchive))).toByteArray(Charsets.UTF_8)
+        require(bytes.size <= maximumSize) { "Cloud backup index is too large" }
+        return bytes
     }
 
-    fun decode(encoded: ByteArray, passphrase: CharArray): List<CloudArchive> {
-        val saltEnd = header.size + saltSize
-        val ivEnd = saltEnd + ivSize
-        require(encoded.size in ivEnd + tagSize..maximumSize && encoded.copyOfRange(0, header.size).contentEquals(header)) {
-            "Invalid cloud backup manifest"
-        }
-        val salt = encoded.copyOfRange(header.size, saltEnd)
-        val iv = encoded.copyOfRange(saltEnd, ivEnd)
-        val plain = try {
-            cipher(Cipher.DECRYPT_MODE, passphrase, salt, iv).doFinal(encoded, ivEnd, encoded.size - ivEnd)
-        } catch (_: GeneralSecurityException) {
-            throw IllegalArgumentException("Incorrect backup passphrase or damaged manifest")
-        }
-        return try {
-            gson.fromJson(String(plain, Charsets.UTF_8), Array<WireArchive>::class.java).map { it.toArchive() }.also(::validate)
+    fun decode(encoded: ByteArray): List<CloudArchive> {
+        require(encoded.size in 2..maximumSize) { "Invalid cloud backup manifest" }
+        val document = try {
+            gson.fromJson(String(encoded, Charsets.UTF_8), Document::class.java)
         } catch (_: RuntimeException) {
             throw IllegalArgumentException("Invalid cloud backup manifest")
-        } finally {
-            plain.fill(0)
-        }
+        } ?: throw IllegalArgumentException("Invalid cloud backup manifest")
+        require(document.format == FORMAT && document.version == VERSION) { "Unsupported cloud backup manifest" }
+        return document.items.map { it.toArchive() }.also(::validate)
     }
 
     private fun validate(archives: List<CloudArchive>) {
@@ -66,22 +42,11 @@ object CloudManifest {
         }
     }
 
-    private fun cipher(mode: Int, passphrase: CharArray, salt: ByteArray, iv: ByteArray): Cipher {
-        val spec = PBEKeySpec(passphrase, salt, 210_000, 256)
-        val key = try {
-            SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
-        } finally {
-            spec.clearPassword()
-        }
-        try {
-            return Cipher.getInstance("AES/GCM/NoPadding").apply {
-                init(mode, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
-                updateAAD(header)
-            }
-        } finally {
-            key.fill(0)
-        }
-    }
+    private class Document(
+        @SerializedName("format") val format: String,
+        @SerializedName("version") val version: Int,
+        @SerializedName("items") val items: List<WireArchive>,
+    )
 
     private class WireArchive(
         @SerializedName("path") val path: String,

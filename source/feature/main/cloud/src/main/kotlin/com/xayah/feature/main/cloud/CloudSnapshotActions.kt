@@ -8,7 +8,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -20,7 +19,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.xayah.core.data.cloudpool.CloudBackupRepository
 import com.xayah.core.ui.component.Clickable
@@ -44,7 +42,6 @@ fun CloudSnapshotActions(uploadEnabled: Boolean = true, onRestore: (suspend (Fil
     val progressUpdates = remember { MutableStateFlow<Pair<Int, Int>?>(null) }
     val progress by progressUpdates.collectAsState()
     var mode by remember { mutableStateOf<Int?>(null) }
-    var password by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var candidates by remember { mutableStateOf<List<CloudBackupRepository.RemoteBackup>?>(null) }
@@ -133,23 +130,19 @@ fun CloudSnapshotActions(uploadEnabled: Boolean = true, onRestore: (suspend (Fil
     }
     val action = mode ?: return
     AlertDialog(
-        onDismissRequest = { mode = null; password = "" },
-        title = { Text(stringResource(when (action) {
-            0 -> R.string.yunx_upload_local
-            1 -> R.string.yunx_download_snapshot
-            else -> R.string.yunx_locations
-        })) },
-        text = { Column {
-            OutlinedTextField(password, { password = it }, singleLine = true,
-                label = { Text(stringResource(R.string.yunx_backup_passphrase)) },
-                visualTransformation = PasswordVisualTransformation())
-        } },
-        dismissButton = { TextButton(onClick = { mode = null; password = "" }) { Text(stringResource(android.R.string.cancel)) } },
+        onDismissRequest = { if (!busy) mode = null },
+        title = {
+            Text(stringResource(when (action) {
+                0 -> R.string.yunx_upload_local
+                1 -> R.string.yunx_download_snapshot
+                else -> R.string.yunx_locations
+            }))
+        },
+        text = { Text(stringResource(R.string.yunx_no_passphrase_hint)) },
+        dismissButton = { TextButton(enabled = !busy, onClick = { mode = null }) { Text(stringResource(android.R.string.cancel)) } },
         confirmButton = {
-            TextButton(enabled = !busy && password.length >= 8, onClick = {
-                val passphrase = password.toCharArray()
+            TextButton(enabled = !busy, onClick = {
                 val backup = selected
-                password = ""
                 mode = null
                 busy = true
                 progressUpdates.value = null
@@ -157,14 +150,14 @@ fun CloudSnapshotActions(uploadEnabled: Boolean = true, onRestore: (suspend (Fil
                     try {
                         val localRoot = withContext(Dispatchers.IO) { File(context.localBackupSaveDir()) }
                         message = if (action == 0) {
-                            val result = repository.publish(localRoot, passphrase) { done, total -> progressUpdates.value = done to total }
+                            val result = repository.publish(localRoot) { done, total -> progressUpdates.value = done to total }
                             receipt = repository.lastConfirmedUpload()
                             if (result.missingCopies.isEmpty()) complete else incomplete
                         } else if (action == 1) {
-                            verifiedFolder = repository.restore(checkNotNull(backup), passphrase) { done, total -> progressUpdates.value = done to total }
+                            verifiedFolder = repository.restore(checkNotNull(backup)) { done, total -> progressUpdates.value = done to total }
                             restored
                         } else {
-                            locations = repository.locations(checkNotNull(backup), passphrase)
+                            locations = repository.locations(checkNotNull(backup))
                             ""
                         }
                     } catch (error: CancellationException) {
@@ -172,7 +165,6 @@ fun CloudSnapshotActions(uploadEnabled: Boolean = true, onRestore: (suspend (Fil
                     } catch (_: Exception) {
                         message = failed
                     } finally {
-                        passphrase.fill('\u0000')
                         progressUpdates.value = null
                         busy = false
                     }

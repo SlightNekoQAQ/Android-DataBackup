@@ -62,7 +62,7 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
         } else {
             mPackagesBackupUtil.backupData(p = p, t = t, r = r, dataType = type, dstDir = dstDir)
         }
-        if (cloudPassword != null && result.isSuccess && t.get(type).state != OperationState.SKIP) {
+        if (cloudRequested && result.isSuccess && t.get(type).state != OperationState.SKIP) {
             t.update(dataType = type, state = OperationState.UPLOADING)
             try {
                 uploadCurrent(mPackageRepo.getArchiveDst(dstDir, type, p.indexInfo.compressionType))
@@ -88,18 +88,18 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
     @Inject
     override lateinit var mPackagesBackupUtil: PackagesBackupUtil
 
-    override val registerLocalRestore: Boolean get() = cloudPassword == null
-    private var cloudPassword: CharArray? = null
+    override val registerLocalRestore: Boolean get() = !cloudRequested
+    private var cloudRequested = false
     private var session: CloudBackupRepository.UploadSession? = null
     private var cloudFailed = false
 
     override fun beforeInitialize() {
-        cloudPassword = CloudBackupRequest.take(CloudBackupRequest.Kind.APPS)
+        cloudRequested = CloudBackupRequest.take(CloudBackupRequest.Kind.APPS)
     }
 
     override suspend fun onTargetDirsCreated() {
-        val password = cloudPassword ?: return
-        runCatching { CloudBackupRepository(mContext).begin(password) }
+        if (!cloudRequested) return
+        runCatching { CloudBackupRepository(mContext).begin() }
             .onSuccess { session = it }
             .onFailure {
                 cloudFailed = true
@@ -121,7 +121,7 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
     }
 
     override suspend fun onConfigSaved(path: String, archivesRelativeDir: String) {
-        if (cloudPassword == null || cloudFailed) return
+        if (!cloudRequested || cloudFailed) return
         try {
             uploadCurrent(path)
         } catch (error: CancellationException) {
@@ -133,14 +133,13 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
     }
 
     override fun onDestroy() {
-        cloudPassword?.fill('\u0000')
-        cloudPassword = null
+        cloudRequested = false
         session = null
         super.onDestroy()
     }
 
     override suspend fun clear() {
-        val password = cloudPassword ?: return
+        if (!cloudRequested) return
         try {
             check(!cloudFailed && mTaskEntity.failureCount == 0) { "Cloud backup incomplete" }
             val result = checkNotNull(session).finish()
@@ -149,13 +148,11 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
             check(mRootService.deleteRecursively(mRootDir)) { "Could not clean cloud staging" }
         } finally {
             session = null
-            password.fill('\u0000')
-            cloudPassword = null
         }
     }
 
     override val mRootDir by lazy {
-        if (cloudPassword == null) mContext.localBackupSaveDir()
+        if (!cloudRequested) mContext.localBackupSaveDir()
         else File(mContext.filesDir, "cloud-work-${UUID.randomUUID()}").path
     }
     override val mAppsDir by lazy { "$mRootDir/apps" }

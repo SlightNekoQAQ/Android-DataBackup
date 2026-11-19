@@ -15,8 +15,7 @@
     <string name="yunx_upload_local">Upload completed local backup</string>
     <string name="yunx_upload_local_desc">Encrypt existing apps, files and configuration archives and upload to your selected folders.</string>
     <string name="yunx_download_snapshot">Download a cloud backup</string>
-    <string name="yunx_backup_passphrase">Backup passphrase (at least 8 characters)</string>
-    <string name="yunx_job_failed">Cloud task failed. Check the account, selected folder, available space and passphrase.</string>
+    <string name="yunx_job_failed">Cloud task failed. Check the account, selected folder and available space.</string>
     <string name="yunx_no_backups">No backup manifests found in the selected folders.</string>
     <string name="yunx_upload_complete">Backup uploaded.</string>
     <string name="yunx_manifest_partial">Backup uploaded, but some recovery index copies could not be saved.</string>
@@ -41,4 +40,5 @@
     <string name="yunx_order_desc">The first drive that can fit the file is used.</string>
     <string name="yunx_order_up">Move up</string>
     <string name="yunx_order_down">Move down</string>
+    <string name="yunx_no_passphrase_hint">Archives are uploaded to the cloud accounts you already authorised. No extra passphrase is needed.</string>
 </resources>

@@ -88,11 +88,10 @@ class CloudPoolTest {
     @Test fun publishesManifestToBothDisksAndRestoresWithoutOriginalFiles() = runBlocking {
         val first = MemoryDrive("fast")
         val second = MemoryDrive("slow")
-        val passphrase = "test-passphrase".toCharArray()
         val snapshot = CloudSnapshot(listOf(first, second), temporary.newFolder())
-        // Prefer a deliberately slower drive by the user's order; it fits exactly one encrypted archive.
+        // Manual order puts "slow" first, and its remaining space fits only the first archive.
         val writer = snapshot.begin(listOf(fast.copy(freeBytes = 150, maxFileBytes = null, priority = 1),
-            slow.copy(freeBytes = 81, priority = 0)), passphrase, useManualOrder = true)
+            slow.copy(freeBytes = 10, priority = 0)), useManualOrder = true)
         val a = temporary.newFile().apply { writeText("first") }
         writer.append(CloudSnapshot.Source("apps/a/archive", a)) { a.delete() }
         assertFalse(a.exists())
@@ -115,24 +114,24 @@ class CloudPoolTest {
         assertEquals(2, references.size)
         val selected = references.first()
         val progress = mutableListOf<Pair<Int, Int>>()
-        val restored = recovery.restore(selected.accountId, selected.remote.id, passphrase) { done, total ->
+        val restored = recovery.restore(selected.accountId, selected.remote.id) { done, total ->
             progress += done to total
         }
         assertEquals(listOf(0 to 2, 1 to 2, 2 to 2), progress)
         assertEquals("first", File(restored, "apps/a/archive").readText())
         assertEquals("second", File(restored, "apps/b/archive").readText())
         val missingDrive = CloudRecovery(listOf(MemoryDrive("slow", objects = second.objects)), temporary.newFolder())
-        val missing = runCatching { missingDrive.restore(selected.accountId, selected.remote.id, passphrase) }
+        val missing = runCatching { missingDrive.restore(selected.accountId, selected.remote.id) }
         assertTrue(missing.exceptionOrNull() is IOException)
         val objectToDamage = first.objects.keys.single { !it.endsWith(CloudManifest.FILE_NAME) }
         first.objects.getValue(objectToDamage)[0] = 0
-        val corrupt = runCatching { recovery.restore(selected.accountId, selected.remote.id, passphrase) }
+        val corrupt = runCatching { recovery.restore(selected.accountId, selected.remote.id) }
         assertTrue(corrupt.exceptionOrNull() is IOException)
     }
 
     @Test fun failedArchiveIsKeptAndIncompleteSnapshotCannotBePublished() = runBlocking {
         val drive = MemoryDrive("fast", IOException("offline"))
-        val writer = CloudSnapshot(listOf(drive), temporary.newFolder()).begin(listOf(fast.copy(maxFileBytes = null)), "test-passphrase".toCharArray())
+        val writer = CloudSnapshot(listOf(drive), temporary.newFolder()).begin(listOf(fast.copy(maxFileBytes = null)))
         val archive = temporary.newFile().apply { writeText("original") }
         val upload = runCatching { writer.append(CloudSnapshot.Source("apps/a/archive", archive)) { archive.delete() } }
         assertTrue(upload.exceptionOrNull() is IOException)
@@ -141,17 +140,17 @@ class CloudPoolTest {
         assertTrue(drive.objects.isEmpty())
     }
 
-    @Test fun manifestRoundTripsAndRejectsTamperingOrDuplicatePaths() {
+    @Test fun manifestRoundTripsAndRejectsDuplicates() {
         val entry = CloudArchive("apps/app/archive", "account", "file", 42, "a".repeat(64))
-        val passphrase = "test-passphrase".toCharArray()
-        val encoded = CloudManifest.encode(listOf(entry), passphrase)
-        assertEquals(listOf(entry), CloudManifest.decode(encoded, passphrase))
+        val encoded = CloudManifest.encode(listOf(entry))
+        assertEquals(listOf(entry), CloudManifest.decode(encoded))
+        // The index is plain JSON on purpose: recovery must not require a user-supplied secret.
+        assertTrue(String(encoded, Charsets.UTF_8).contains("databackup-cloud-index"))
+        assertThrows(IllegalArgumentException::class.java) { CloudManifest.encode(listOf(entry, entry)) }
         assertThrows(IllegalArgumentException::class.java) {
-            CloudManifest.decode(encoded, "wrong-passphrase".toCharArray())
+            CloudManifest.decode("""{"format":"other","version":1,"items":[]}""".toByteArray())
         }
-        encoded[encoded.lastIndex] = (encoded.last().toInt() xor 1).toByte()
-        assertThrows(IllegalArgumentException::class.java) { CloudManifest.decode(encoded, passphrase) }
-        assertThrows(IllegalArgumentException::class.java) { CloudManifest.encode(listOf(entry, entry), passphrase) }
+        assertThrows(IllegalArgumentException::class.java) { CloudManifest.decode("not json".toByteArray()) }
     }
 
     @Test fun parsesSixSupportedDrivesAndSkipsOtherCredentials() {

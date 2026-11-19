@@ -12,37 +12,18 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
-/** A collection of finalized DataBackup archives and sidecars, indexed by their relative paths. */
+/**
+ * A collection of finalized DataBackup archives and sidecars, indexed by their relative paths.
+ * Archives travel to the user's own cloud accounts unmodified; only size and SHA-256 are checked,
+ * so recovery needs nothing beyond the account credentials.
+ */
 class CloudSnapshot(private val drives: List<CloudDrive>, private val privateStaging: File) {
     data class Source(val relativePath: String, val file: File)
     data class Published(val id: String, val manifestCopies: Map<String, String>, val missingCopies: Set<String>)
 
-    suspend fun publish(
-        sources: List<Source>,
-        targets: List<CloudTarget>,
-        passphrase: CharArray,
-        useManualOrder: Boolean = false,
-        onProgress: (Int, Int) -> Unit = { _, _ -> },
-    ): Published = withContext(Dispatchers.IO) {
-        require(passphrase.size >= 8)
-        require(sources.isNotEmpty() && sources.map(Source::relativePath).distinct().size == sources.size)
-        val writer = begin(targets, passphrase, useManualOrder)
-        onProgress(0, sources.size)
-        sources.forEachIndexed { index, source ->
-            writer.append(source)
-            onProgress(index + 1, sources.size)
-        }
-        writer.finish()
-    }
+    fun begin(targets: List<CloudTarget>, useManualOrder: Boolean = false): Writer = Writer(targets, useManualOrder)
 
-    fun begin(targets: List<CloudTarget>, passphrase: CharArray, useManualOrder: Boolean = false): Writer {
-        require(passphrase.size >= 8)
-        return Writer(targets, passphrase, useManualOrder)
-    }
-
-    inner class Writer internal constructor(
-        private val targets: List<CloudTarget>, private val passphrase: CharArray, private val manual: Boolean,
-    ) {
+    inner class Writer internal constructor(private val targets: List<CloudTarget>, private val manual: Boolean) {
         private val id = UUID.randomUUID().toString()
         private val transfer = CloudTransfer(drives)
         private val entries = mutableListOf<CloudArchive>()
@@ -54,13 +35,9 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
             try {
                 validateRelativePath(source.relativePath)
                 require(source.file.isFile && source.file.canRead() && entries.none { it.relativePath == source.relativePath })
-                check(privateStaging.isDirectory || privateStaging.mkdirs())
-                val encrypted = File.createTempFile("payload-", ".partial", privateStaging)
-                try {
-                    CloudPayload.encrypt(source.file, encrypted, passphrase, source.relativePath)
-                    entries += transfer.store(encrypted, source.relativePath, "db-$id-${entries.size}.bin", targets, manual)
-                    afterConfirmedUpload()
-                } finally { encrypted.delete() }
+                // The user-visible archive path lives in the index; payloads stay flat and opaque.
+                entries += transfer.store(source.file, source.relativePath, "db-$id-${entries.size}.bin", targets, manual)
+                afterConfirmedUpload()
             } catch (error: Exception) {
                 failed = true
                 throw error
@@ -70,16 +47,17 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         suspend fun finish(): Published = withContext(Dispatchers.IO) {
             check(!finished && !failed && entries.isNotEmpty())
             finished = true
-            val temporary = File.createTempFile("manifest-", ".partial", privateStaging)
+            check(privateStaging.isDirectory || privateStaging.mkdirs() || privateStaging.isDirectory)
+            val temporary = File.createTempFile("index-", ".partial", privateStaging)
             try {
-                temporary.writeBytes(CloudManifest.encode(entries, passphrase))
+                temporary.writeBytes(CloudManifest.encode(entries))
                 val copies = linkedMapOf<String, String>()
                 val missing = linkedSetOf<String>()
                 val used = entries.map(CloudArchive::accountId).toSet()
                 for (drive in drives.filter { it.accountId in used }) {
                     try {
                         val reference = drive.upload(temporary, "db-$id-${CloudManifest.FILE_NAME}")
-                        if (reference.isBlank()) throw IOException("Provider did not confirm manifest upload")
+                        if (reference.isBlank()) throw IOException("Provider did not confirm index upload")
                         copies[drive.accountId] = reference
                     } catch (error: CancellationException) {
                         throw error
@@ -87,7 +65,7 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
                         missing += drive.accountId
                     }
                 }
-                if (copies.isEmpty()) throw IOException("Cloud backup has no recoverable manifest")
+                if (copies.isEmpty()) throw IOException("Cloud backup has no recoverable index")
                 Published(id, copies, missing)
             } finally {
                 temporary.delete()
@@ -96,38 +74,27 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
     }
 
     /** Downloads verified files to a new tree. An incomplete tree never reaches the restore caller. */
-    suspend fun retrieve(manifest: ByteArray, passphrase: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
-        val archives = CloudManifest.decode(manifest, passphrase)
+    suspend fun retrieve(manifest: ByteArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
+        val archives = CloudManifest.decode(manifest)
         val missing = archives.map(CloudArchive::accountId).toSet() - drives.map(CloudDrive::accountId).toSet()
         if (missing.isNotEmpty()) throw IOException("One or more required cloud accounts are unavailable")
         val staging = File(privateStaging, "snapshot-${UUID.randomUUID()}")
         check(staging.mkdirs())
         val transfer = CloudTransfer(drives)
         try {
-            val incoming = File(privateStaging, "incoming-${UUID.randomUUID()}")
-            check(incoming.mkdirs())
-            try {
-                onProgress(0, archives.size)
-                val slots = Semaphore(3)
-                val progressLock = Any()
-                var completed = 0
-                coroutineScope {
-                    archives.groupBy(CloudArchive::accountId).values.map { accountArchives ->
-                        async {
-                            for (archive in accountArchives) slots.withPermit {
-                                val encrypted = transfer.retrieve(archive, incoming)
-                                val plain = File(staging, archive.relativePath)
-                                val parent = checkNotNull(plain.parentFile)
-                                check(parent.isDirectory || parent.mkdirs() || parent.isDirectory)
-                                CloudPayload.decrypt(encrypted, plain, passphrase, archive.relativePath)
-                                encrypted.delete()
-                                synchronized(progressLock) { onProgress(++completed, archives.size) }
-                            }
+            onProgress(0, archives.size)
+            val slots = Semaphore(3)
+            val progressLock = Any()
+            var completed = 0
+            coroutineScope {
+                archives.groupBy(CloudArchive::accountId).values.map { accountArchives ->
+                    async {
+                        for (archive in accountArchives) slots.withPermit {
+                            transfer.retrieve(archive, staging)
+                            synchronized(progressLock) { onProgress(++completed, archives.size) }
                         }
-                    }.awaitAll()
-                }
-            } finally {
-                incoming.deleteRecursively()
+                    }
+                }.awaitAll()
             }
             staging
         } catch (error: Exception) {

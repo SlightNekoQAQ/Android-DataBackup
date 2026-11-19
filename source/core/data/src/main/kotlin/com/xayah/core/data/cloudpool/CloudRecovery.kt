@@ -43,8 +43,8 @@ class CloudRecovery(private val drives: List<CloudDrive>, private val staging: F
         }
     }
 
-    suspend fun restore(accountId: String, objectId: String, passphrase: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File =
-        CloudSnapshot(drives, staging).retrieve(readManifest(accountId, objectId), passphrase, onProgress)
+    suspend fun restore(accountId: String, objectId: String, onProgress: (Int, Int) -> Unit = { _, _ -> }): File =
+        CloudSnapshot(drives, staging).retrieve(readManifest(accountId, objectId), onProgress)
 
     private fun isManifest(remote: RemoteObject) = remote.bytes in 1..MAX_MANIFEST &&
         remote.name.startsWith("db-") && remote.name.endsWith(CloudManifest.FILE_NAME)

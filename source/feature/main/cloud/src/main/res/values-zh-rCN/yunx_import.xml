@@ -15,8 +15,7 @@
     <string name="yunx_upload_local">上传已完成的本地备份</string>
     <string name="yunx_upload_local_desc">加密现有应用、文件和配置备份，上传到所选网盘目录。</string>
     <string name="yunx_download_snapshot">下载网盘备份</string>
-    <string name="yunx_backup_passphrase">备份口令（至少 8 位）</string>
-    <string name="yunx_job_failed">网盘任务失败。请检查账号、所选目录、剩余空间及口令。</string>
+    <string name="yunx_job_failed">网盘任务失败。请检查账号、所选目录及剩余空间。</string>
     <string name="yunx_no_backups">所选网盘目录未发现备份清单。</string>
     <string name="yunx_upload_complete">网盘备份已上传。</string>
     <string name="yunx_manifest_partial">备份已上传，但部分清单副本未能保存。</string>
@@ -41,4 +40,5 @@
     <string name="yunx_order_desc">从第一位开始，空间不足或超过单文件上限就换下一个盘。</string>
     <string name="yunx_order_up">上移</string>
     <string name="yunx_order_down">下移</string>
+    <string name="yunx_no_passphrase_hint">备份会直接上传到你已授权的网盘账号，无需再输入任何口令。</string>
 </resources>

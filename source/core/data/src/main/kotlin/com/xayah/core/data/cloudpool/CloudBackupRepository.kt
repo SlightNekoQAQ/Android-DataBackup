@@ -71,14 +71,14 @@ class CloudBackupRepository(context: Context) {
 
     fun hasDestinations(): Boolean = vault.load().any { YunxCredentialImport.supports(it.platform) }
 
-    suspend fun publish(localRoot: File, password: CharArray, folders: Set<String>? = null, onProgress: (Int, Int) -> Unit = { _, _ -> }): CloudSnapshot.Published = withContext(Dispatchers.IO) {
+    suspend fun publish(localRoot: File, folders: Set<String>? = null, onProgress: (Int, Int) -> Unit = { _, _ -> }): CloudSnapshot.Published = withContext(Dispatchers.IO) {
         val root = localRoot.canonicalFile
         val sources = (folders ?: setOf("apps", "files", "configs")).flatMap { category ->
             validateRelativePath(category)
             val base = File(root, category)
             if (!base.isDirectory) emptyList() else collect(root, base)
         }
-        val session = begin(password)
+        val session = begin()
         onProgress(0, sources.size)
         sources.forEachIndexed { index, source ->
             session.append(source.file, source.relativePath)
@@ -93,7 +93,7 @@ class CloudBackupRepository(context: Context) {
         suspend fun finish() = writer.finish().also(confirm)
     }
 
-    suspend fun begin(password: CharArray): UploadSession = withContext(Dispatchers.IO) {
+    suspend fun begin(): UploadSession = withContext(Dispatchers.IO) {
         val ready = prepareDestinations().filter { it.ready }.map { it.slot }.toSet()
         val accounts = configured().filter { it.slot in ready }
         require(accounts.isNotEmpty()) { "Could not locate or create /backup on any account" }
@@ -111,7 +111,7 @@ class CloudBackupRepository(context: Context) {
                 maxFileBytes = drive.maxFileBytes,
             )
         }
-        UploadSession(CloudSnapshot(drives, staging).begin(targets, password, useManualOrder = manualOrder != null)) { published ->
+        UploadSession(CloudSnapshot(drives, staging).begin(targets, useManualOrder = manualOrder != null)) { published ->
             val confirmedProviders = accounts.filter { it.key in published.manifestCopies }.map { it.account.platform }.distinct()
             receipts.edit().putString("snapshot-and-providers", "${published.id} · ${confirmedProviders.joinToString()}").apply()
         }
@@ -147,10 +147,10 @@ class CloudBackupRepository(context: Context) {
 
     data class FileLocation(val original: String, val provider: String, val account: String, val remoteName: String?, val folder: String)
 
-    suspend fun locations(backup: RemoteBackup, password: CharArray): List<FileLocation> = withContext(Dispatchers.IO) {
+    suspend fun locations(backup: RemoteBackup): List<FileLocation> = withContext(Dispatchers.IO) {
         val accounts = configured(includeLegacy = true)
         val manifest = CloudRecovery(accounts.map { it.asDrive() }, staging).readManifest(backup.accountKey, backup.objectId)
-        val archives = CloudManifest.decode(manifest, password)
+        val archives = CloudManifest.decode(manifest)
         val locations = mutableMapOf<String, Map<String, String>>()
         for (account in accounts.filter { target -> archives.any { it.accountId == target.key } }) {
             try {
@@ -170,9 +170,9 @@ class CloudBackupRepository(context: Context) {
         }
     }
 
-    suspend fun restore(backup: RemoteBackup, password: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
+    suspend fun restore(backup: RemoteBackup, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
         val drives = configured(includeLegacy = true).map { it.asDrive() }
-        CloudRecovery(drives, staging).restore(backup.accountKey, backup.objectId, password, onProgress)
+        CloudRecovery(drives, staging).restore(backup.accountKey, backup.objectId, onProgress)
     }
 
     private fun collect(root: File, directory: File): List<CloudSnapshot.Source> {
