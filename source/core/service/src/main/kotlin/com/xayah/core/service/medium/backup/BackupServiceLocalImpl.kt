@@ -5,6 +5,8 @@ import com.xayah.core.data.cloudpool.CloudBackupRequest
 import com.xayah.core.data.repository.MediaRepository
 import com.xayah.core.model.OperationState
 import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import com.xayah.core.data.repository.TaskRepository
 import com.xayah.core.database.dao.MediaDao
 import com.xayah.core.database.dao.TaskDao
@@ -16,9 +18,7 @@ import com.xayah.core.model.database.TaskEntity
 import com.xayah.core.rootservice.service.RemoteRootService
 import com.xayah.core.service.util.CommonBackupUtil
 import com.xayah.core.service.util.MediumBackupUtil
-import com.xayah.core.util.NotificationUtil
 import com.xayah.core.util.PathUtil
-import com.xayah.core.service.R
 import com.xayah.core.util.localBackupSaveDir
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -55,7 +55,19 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
     }
 
     override suspend fun backup(m: MediaEntity, r: MediaEntity?, t: TaskDetailMediaEntity, dstDir: String) {
-        mMediumBackupUtil.backupMedia(m = m, t = t, r = r, dstDir = dstDir)
+        val result = mMediumBackupUtil.backupMedia(m = m, t = t, r = r, dstDir = dstDir)
+        if (cloudPassword != null && result.isSuccess && t.mediaInfo.state != OperationState.SKIP) {
+            t.update(state = OperationState.UPLOADING)
+            try {
+                uploadCurrent(mMediaRepo.getArchiveDst(dstDir, m.indexInfo.compressionType))
+                t.update(state = OperationState.DONE)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                cloudFailed = true
+                t.update(state = OperationState.ERROR, log = "Cloud upload failed; temporary archive retained")
+            }
+        }
         t.update(progress = 1f)
         t.update(processingIndex = t.processingIndex + 1)
     }
@@ -69,34 +81,64 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
     @Inject
     override lateinit var mMediumBackupUtil: MediumBackupUtil
 
+    override val registerLocalRestore: Boolean get() = cloudPassword == null
     private var cloudPassword: CharArray? = null
+    private var session: CloudBackupRepository.UploadSession? = null
+    private var cloudFailed = false
+
+    override fun beforeInitialize() {
+        cloudPassword = CloudBackupRequest.take(CloudBackupRequest.Kind.FILES)
+    }
 
     override suspend fun onTargetDirsCreated() {
-        cloudPassword = CloudBackupRequest.take(CloudBackupRequest.Kind.FILES)
+        val password = cloudPassword ?: return
+        session = CloudBackupRepository(mContext).begin(password)
+    }
+
+    private suspend fun uploadCurrent(path: String) {
+        val writer = checkNotNull(session) { "Cloud session is not ready" }
+        val root = File(mRootDir)
+        val file = File(path)
+        requireArchiveInStaging(root, file)
+        if (!file.canRead()) mRootService.setAllPermissions(path).getOrThrow()
+        writer.append(file, file.relativeTo(root).invariantSeparatorsPath)
+    }
+
+    private fun requireArchiveInStaging(root: File, file: File) {
+        require(file.canonicalPath.startsWith(root.canonicalPath + File.separator))
+    }
+
+    override suspend fun onConfigSaved(path: String, archivesRelativeDir: String) {
+        if (cloudPassword == null || cloudFailed) return
+        try { uploadCurrent(path) } catch (error: CancellationException) { throw error }
+        catch (_: Exception) { cloudFailed = true }
     }
 
     override fun onDestroy() {
         cloudPassword?.fill('\u0000')
         cloudPassword = null
+        session = null
         super.onDestroy()
     }
 
     override suspend fun clear() {
         val password = cloudPassword ?: return
-        cloudPassword = null
         try {
-            val folders = mMediaEntities.filter { it.state == OperationState.DONE }
-                .map { "files/${it.mediaEntity.archivesRelativeDir}" }.toSet()
-            require(folders.isNotEmpty()) { "No completed file backups to upload" }
-            val result = CloudBackupRepository(mContext).publish(File(mRootDir), password, folders) { done, total ->
-                NotificationUtil.notify(mContext, mNotificationBuilder, mContext.getString(R.string.backing_up),
-                    "$done / $total", max = total, progress = done)
-            }
+            check(!cloudFailed && mTaskEntity.failureCount == 0) { "Cloud backup incomplete" }
+            val result = checkNotNull(session).finish()
             check(result.missingCopies.isEmpty()) { "Not all cloud recovery indexes could be uploaded" }
-        } finally { password.fill('\u0000') }
+            check(mRootService.deleteRecursively(mRootDir)) { "Could not clean cloud staging" }
+        } finally {
+            session = null
+            password.fill('\u0000')
+            cloudPassword = null
+        }
     }
 
-    override val mRootDir by lazy { mContext.localBackupSaveDir() }
-    override val mFilesDir by lazy { mPathUtil.getLocalBackupFilesDir() }
-    override val mConfigsDir by lazy { mPathUtil.getLocalBackupConfigsDir() }
+    override val mRootDir by lazy {
+        if (cloudPassword == null) mContext.localBackupSaveDir()
+        else File(mContext.filesDir, "cloud-work-${UUID.randomUUID()}").path
+    }
+    override val mFilesDir by lazy { "$mRootDir/files" }
+    override val mConfigsDir by lazy { "$mRootDir/configs" }
 }

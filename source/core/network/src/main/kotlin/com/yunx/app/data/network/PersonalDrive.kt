@@ -19,10 +19,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
     private fun required(name: String) = field(name).ifBlank { throw IOException("Account session requires re-import") }
     private val cookie get() = required("cookie")
     private val token get() = required("accessToken")
-    private val deviceId get() = required("deviceId")
-    private val captcha get() = field("captchaToken")
-    private val uuid get() = required("uuid")
-    private val appToken get() = required("appToken")
     private val c139Cookie get() = if (C139Constants.extractAuthorization(cookie) != null) cookie
         else "$cookie; authorization=${required("authorization")}"
 
@@ -32,13 +28,9 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
     private val c139 by lazy { C139Api(deviceInfoProvider = { C139DeviceInfo.from(context.applicationContext) }) }
     private val pan123 by lazy { Pan123DeviceId.install(context.applicationContext); Pan123Api() }
     private val pan115 by lazy { Pan115Api() }
-    private val xunlei by lazy { XunleiApi() }
-    private val guangya by lazy { GuangYaApi().apply { deviceIdProvider = { deviceId } } }
-    private val ilanzou by lazy { ILanzouApi() }
 
     val rootId: String get() = when (platform) {
         "baidu", "c139" -> "/"
-        "guangya", "xunlei" -> ""
         else -> "0"
     }
 
@@ -46,7 +38,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
         require(file.isdir)
         return when (platform) {
             "baidu" -> file.fidToken
-            "ilanzou" -> file.fid.removePrefix(ILanzouConstants.FOLDER_PREFIX)
             else -> file.fid
         }.also { require(it.isNotBlank()) }
     }
@@ -69,9 +60,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
                 }
                 throw IOException("网盘目录分页未完成")
             }
-            "xunlei" -> xunlei.getFiles(parent, token, deviceId, captcha).orEmpty()
-            "guangya" -> guangya.listCloudFiles(token, parent)
-            "ilanzou" -> ilanzou.listFiles(appToken, uuid, parent)
             else -> unsupported()
         }
     }
@@ -85,9 +73,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
         "c139" -> c139.getQuota(c139Cookie)
         "pan123" -> pan123.getQuota(token)
         "pan115" -> pan115.getQuota(cookie)
-        "xunlei" -> xunlei.getQuota(token, deviceId, captcha)
-        "guangya" -> guangya.getQuota(token, GuangYaDevice(deviceId, field("deviceSign")))
-        "ilanzou" -> ilanzou.getQuota(appToken, uuid)
         else -> unsupported()
     }
 
@@ -100,9 +85,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
             "c139" -> c139.createDir(parent, name, c139Cookie)
             "pan123" -> pan123.createDir(parent, name, token)
             "pan115" -> pan115.createDir(parent, name, cookie)
-            "xunlei" -> xunlei.createFolder(name, parent, token, deviceId, captcha)
-            "guangya" -> guangya.createDir(token, parent, name)
-            "ilanzou" -> ilanzou.createDir(appToken, uuid, parent, name)
             else -> unsupported()
         }?.takeIf(String::isNotBlank) ?: throw IOException("无法创建网盘备份目录")
     }
@@ -117,9 +99,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
             "c139" -> c139.upload(io, source, parent, c139Cookie)
             "pan123" -> pan123.upload(io, source, parent, token)
             "pan115" -> pan115.upload(io, source, parent, cookie)
-            "xunlei" -> xunlei.upload(io, source, parent, token, deviceId, captcha)
-            "guangya" -> guangya.upload(io, source, parent, token)
-            "ilanzou" -> ilanzou.upload(io, source, parent, appToken, uuid)
             else -> unsupported()
         }
         // Some APIs return an upload-session ID or nothing (e.g. when deduplicated). Always confirm
@@ -146,9 +125,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
             "c139" -> c139.getDownloadUrl(file.fid, c139Cookie)
             "pan123" -> pan123.getDownloadLink(file, token)
             "pan115" -> pan115.getDownloadLink(file, cookie)
-            "xunlei" -> xunlei.getFileDetail(file.fid, token, deviceId, captcha)
-            "guangya" -> guangya.getDownloadLink(token, file)
-            "ilanzou" -> ilanzou.getDownloadLink(appToken, uuid, file.fid.removePrefix(ILanzouConstants.FILE_PREFIX), required("userId"))
             else -> unsupported()
         }?.takeIf { it.downloadUrl.startsWith("https://") && !it.isHls }
             ?: throw IOException("网盘未返回可用的原始文件下载地址")
@@ -162,10 +138,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
         "pan123" -> mapOf("User-Agent" to Pan123Constants.WEB_UA, "Referer" to Pan123Constants.DOWNLOAD_REFERER)
         "pan115" -> mapOf("Cookie" to Pan115Constants.mergeCookies(cookie, link.guestCookie),
             "User-Agent" to Pan115Constants.CLIENT_UA, "Referer" to Pan115Constants.DOWNLOAD_REFERER)
-        "xunlei" -> mapOf("User-Agent" to XunleiConstants.APP_UA)
-        "guangya" -> mapOf("User-Agent" to GuangYaConstants.WEB_UA, "Referer" to GuangYaConstants.DOWNLOAD_REFERER)
-        "ilanzou" -> mapOf("User-Agent" to ILanzouConstants.WEB_UA, "Origin" to ILanzouConstants.DOWNLOAD_ORIGIN,
-            "Referer" to ILanzouConstants.DOWNLOAD_REFERER)
         else -> unsupported()
     }
 

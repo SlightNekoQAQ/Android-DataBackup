@@ -8,6 +8,15 @@ class CloudDestinationPreferences(context: Context) {
 
     fun read(slot: Int): String? = preferences.getString("folder-$slot", null)
 
+    fun manualOrder(): List<Int>? = preferences.getString("upload-order", null)?.split(',')?.mapNotNull(String::toIntOrNull)
+
+    fun saveManualOrder(slots: List<Int>?) {
+        require(slots == null || (slots.all { it >= 0 } && slots.distinct().size == slots.size))
+        val edit = preferences.edit()
+        if (slots == null) edit.remove("upload-order") else edit.putString("upload-order", slots.joinToString(","))
+        check(edit.commit()) { "Cannot save upload order" }
+    }
+
     fun defaultFolder(slot: Int): String? = preferences.getString("default-folder-$slot", null)
 
     fun saveDefaultFolder(slot: Int, folderId: String) {

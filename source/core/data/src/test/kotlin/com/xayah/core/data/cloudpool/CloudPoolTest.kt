@@ -82,20 +82,26 @@ class CloudPoolTest {
     @Test fun publishesManifestToBothDisksAndRestoresWithoutOriginalFiles() = runBlocking {
         val first = MemoryDrive("fast")
         val second = MemoryDrive("slow")
-        val a = temporary.newFile().apply { writeText("first") }
-        val b = temporary.newFile().apply { writeText("second") }
         val passphrase = "test-passphrase".toCharArray()
         val snapshot = CloudSnapshot(listOf(first, second), temporary.newFolder())
-        val manifest = snapshot.publish(
-            listOf(CloudSnapshot.Source("apps/a/archive", a), CloudSnapshot.Source("apps/b/archive", b)),
-            listOf(fast.copy(freeBytes = 81, maxFileBytes = null), slow), passphrase,
-        )
+        // Prefer a deliberately slower drive by the user's order; it fits exactly one encrypted archive.
+        val writer = snapshot.begin(listOf(fast.copy(freeBytes = 150, maxFileBytes = null, priority = 1),
+            slow.copy(freeBytes = 81, priority = 0)), passphrase, useManualOrder = true)
+        val a = temporary.newFile().apply { writeText("first") }
+        writer.append(CloudSnapshot.Source("apps/a/archive", a), deleteAfterUpload = true)
+        assertFalse(a.exists())
+        assertEquals(1, second.objects.size)
+        assertTrue(first.objects.isEmpty())
+        val b = temporary.newFile().apply { writeText("second") }
+        writer.append(CloudSnapshot.Source("apps/b/archive", b), deleteAfterUpload = true)
+        assertFalse(b.exists())
+        assertEquals(1, first.objects.size)
+        assertEquals(1, second.objects.size)
+        val manifest = writer.finish()
         assertEquals(setOf("fast", "slow"), manifest.manifestCopies.keys)
         assertTrue(manifest.missingCopies.isEmpty())
         val bytes = first.objects.getValue(manifest.manifestCopies.getValue("fast"))
         assertTrue(bytes.contentEquals(second.objects.getValue(manifest.manifestCopies.getValue("slow"))))
-        assertTrue(a.delete())
-        assertTrue(b.delete())
         val progress = mutableListOf<Pair<Int, Int>>()
         val restored = CloudSnapshot(listOf(second, first), temporary.newFolder()).retrieve(bytes, passphrase) { done, total ->
             progress += done to total
@@ -103,6 +109,17 @@ class CloudPoolTest {
         assertEquals(listOf(0 to 2, 1 to 2, 2 to 2), progress)
         assertEquals("first", File(restored, "apps/a/archive").readText())
         assertEquals("second", File(restored, "apps/b/archive").readText())
+    }
+
+    @Test fun failedArchiveIsKeptAndIncompleteSnapshotCannotBePublished() = runBlocking {
+        val drive = MemoryDrive("fast", IOException("offline"))
+        val writer = CloudSnapshot(listOf(drive), temporary.newFolder()).begin(listOf(fast.copy(maxFileBytes = null)), "test-passphrase".toCharArray())
+        val archive = temporary.newFile().apply { writeText("original") }
+        val upload = runCatching { writer.append(CloudSnapshot.Source("apps/a/archive", archive), deleteAfterUpload = true) }
+        assertTrue(upload.exceptionOrNull() is IOException)
+        assertEquals("original", archive.readText())
+        assertTrue(runCatching { writer.finish() }.isFailure)
+        assertTrue(drive.objects.isEmpty())
     }
 
     @Test fun manifestRoundTripsAndRejectsTamperingOrDuplicatePaths() {
@@ -118,16 +135,18 @@ class CloudPoolTest {
         assertThrows(IllegalArgumentException::class.java) { CloudManifest.encode(listOf(entry, entry), passphrase) }
     }
 
-    @Test fun parsesNineSupportedDrivesAndSkipsOtherCredentials() {
+    @Test fun parsesSixSupportedDrivesAndSkipsOtherCredentials() {
         val platforms = mapOf(
-            "quark" to "cookie", "uc" to "cookie", "xunlei" to "accessToken", "baidu" to "cookie",
-            "c139" to "cookie", "pan123" to "accessToken", "pan115" to "cookie", "guangya" to "accessToken",
-            "ilanzou" to "appToken",
+            "quark" to "cookie", "uc" to "cookie", "baidu" to "cookie",
+            "c139" to "cookie", "pan123" to "accessToken", "pan115" to "cookie",
         )
         val entries = platforms.map { (platform, key) -> """{"platform":"$platform","$key":"example-secret"}""" } +
             listOf(
                 """{"platform":"video_bilibili","cookie":"ignored"}""",
                 """{"platform":"lanzou","cookie":"ignored"}""",
+                """{"platform":"xunlei","accessToken":"ignored"}""",
+                """{"platform":"guangya","accessToken":"ignored"}""",
+                """{"platform":"ilanzou","appToken":"ignored"}""",
                 """{"platform":"quark","cookie":""}""",
             )
         val export = """{"app":"yunx_auth_backup","version":1,"githubToken":"ignored","accounts":[${entries.joinToString(",")}]}"""

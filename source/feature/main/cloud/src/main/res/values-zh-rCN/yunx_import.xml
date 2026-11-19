@@ -35,4 +35,10 @@
     <string name="yunx_backup_retry">/backup 未就绪 · 点击重试</string>
     <string name="yunx_locations">查看文件位置</string>
     <string name="yunx_location_unverified">未能在远端目录核实此文件</string>
+    <string name="yunx_upload_order">上传优先级</string>
+    <string name="yunx_order_auto">自动（按下载速度）</string>
+    <string name="yunx_order_manual">手动排序</string>
+    <string name="yunx_order_desc">从第一位开始，空间不足或超过单文件上限就换下一个盘。</string>
+    <string name="yunx_order_up">上移</string>
+    <string name="yunx_order_down">下移</string>
 </resources>

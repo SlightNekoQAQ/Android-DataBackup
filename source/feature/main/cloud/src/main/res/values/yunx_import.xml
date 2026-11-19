@@ -35,4 +35,10 @@
     <string name="yunx_backup_retry">/backup not ready · tap to retry</string>
     <string name="yunx_locations">File locations</string>
     <string name="yunx_location_unverified">File not verified in the remote listing</string>
+    <string name="yunx_upload_order">Upload priority</string>
+    <string name="yunx_order_auto">Automatic (download speed)</string>
+    <string name="yunx_order_manual">Manual order</string>
+    <string name="yunx_order_desc">The first drive that can fit the file is used.</string>
+    <string name="yunx_order_up">Move up</string>
+    <string name="yunx_order_down">Move down</string>
 </resources>

@@ -31,14 +31,14 @@ object YunxCredentialImport {
     private val schemas = mapOf(
         "quark" to schema("cookie"),
         "uc" to schema("cookie"),
-        "xunlei" to schema("accessToken", "refreshToken", "deviceId", "captchaToken", "authType"),
         "baidu" to schema("cookie"),
         "c139" to schema("cookie", "authorization"),
         "pan123" to schema("accessToken", "account"),
         "pan115" to schema("cookie"),
-        "guangya" to schema("accessToken", "refreshToken", "deviceId", "deviceSign", "account"),
-        "ilanzou" to schema("appToken", "uuid", "account", "password", "userId"),
+
     )
+
+    fun supports(platform: String): Boolean = platform in schemas
 
     fun parse(content: String, password: CharArray? = null): List<ImportedCloudAccount> {
         require(content.length <= MAX_EXPORT_CHARS) { "YunX export is too large" }

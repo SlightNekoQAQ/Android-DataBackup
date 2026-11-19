@@ -102,6 +102,7 @@ internal abstract class AbstractProcessingService : Service() {
 
     abstract suspend fun onInitializingPreprocessingEntities(entities: MutableList<ProcessingInfoEntity>)
     abstract suspend fun onInitializingPostProcessingEntities(entities: MutableList<ProcessingInfoEntity>)
+    protected open fun beforeInitialize() {}
     abstract suspend fun onInitializing()
     protected open suspend fun beforePreprocessing() {}
     abstract suspend fun onPreprocessing(entity: ProcessingInfoEntity)
@@ -133,6 +134,7 @@ internal abstract class AbstractProcessingService : Service() {
     suspend fun initialize(): Long {
         mMutex.withLock {
             if (mIsInitialized.not()) {
+                beforeInitialize()
                 mTaskDao.upsert(mTaskEntity).apply {
                     // Initialize task id.
                     mTaskEntity.id = this

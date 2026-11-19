@@ -18,6 +18,10 @@ data class CloudTarget(
     }
 }
 
+/** Manual order may contain stale slots; retain the order of any newly available accounts. */
+fun uploadSlotOrder(available: List<Int>, manual: List<Int>?): List<Int> =
+    (manual.orEmpty().filter { it in available } + available).distinct()
+
 /** Calculates candidates only. Persist a reservation before uploading; never split a file here. */
 object CloudPlacement {
     fun candidates(

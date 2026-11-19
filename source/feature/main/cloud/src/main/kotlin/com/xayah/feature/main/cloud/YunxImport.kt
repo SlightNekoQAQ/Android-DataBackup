@@ -72,6 +72,7 @@ internal fun YunxImport() {
     }
     Title(title = stringResource(R.string.yunx_account_group)) {
         accounts.forEachIndexed { slot, account ->
+            if (!YunxCredentialImport.supports(account.platform)) return@forEachIndexed
             Clickable(
                 enabled = !busy,
                 icon = Icons.Outlined.Cloud,
@@ -79,6 +80,7 @@ internal fun YunxImport() {
                 value = listOf(account.nickname, stringResource(if (slot in configured) R.string.yunx_backup_ready else R.string.yunx_backup_retry)).filter(String::isNotBlank).joinToString(" · "),
             ) { if (slot in configured) inspected = slot else refresh++ }
         }
+        UploadOrderOption(accounts, destinations)
         Clickable(
             enabled = !busy,
             icon = Icons.Rounded.Add,

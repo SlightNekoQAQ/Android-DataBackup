@@ -42,7 +42,7 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-internal fun CloudSnapshotActions() {
+fun CloudSnapshotActions(restoreEnabled: Boolean = true, uploadEnabled: Boolean = true) {
     val context = LocalContext.current.applicationContext
     val navController = checkNotNull(LocalNavController.current)
     val repository = remember(context) { CloudBackupRepository(context) }
@@ -67,13 +67,13 @@ internal fun CloudSnapshotActions() {
         receipt?.let {
             Clickable(readOnly = true, title = stringResource(R.string.yunx_upload_receipt), value = it)
         }
-        Clickable(enabled = !busy, icon = Icons.Outlined.Cloud, title = stringResource(R.string.yunx_upload_local),
+        if (uploadEnabled) Clickable(enabled = !busy, icon = Icons.Outlined.Cloud, title = stringResource(R.string.yunx_upload_local),
             desc = stringResource(R.string.yunx_upload_local_desc)) {
             message = ""
             verifiedFolder = null
             mode = 0
         }
-        Clickable(enabled = !busy, icon = Icons.Outlined.Cloud, title = stringResource(R.string.yunx_download_snapshot)) {
+        Clickable(enabled = !busy, icon = Icons.Outlined.Cloud, title = stringResource(if (restoreEnabled) R.string.yunx_download_snapshot else R.string.yunx_locations)) {
             busy = true
             message = ""
             scope.launch {
@@ -114,10 +114,10 @@ internal fun CloudSnapshotActions() {
             title = { Text(stringResource(R.string.yunx_download_snapshot)) },
             text = { LazyColumn(Modifier.heightIn(max = 360.dp)) {
                 items(options) { backup ->
-                    TextButton(onClick = { selected = backup; verifiedFolder = null; candidates = null; mode = 1 }) {
+                    TextButton(onClick = { selected = backup; verifiedFolder = null; candidates = null; mode = if (restoreEnabled) 1 else 2 }) {
                         Text("${providerName(backup.provider)} · ${backup.label}")
                     }
-                    TextButton(onClick = { selected = backup; candidates = null; mode = 2 }) {
+                    if (restoreEnabled) TextButton(onClick = { selected = backup; candidates = null; mode = 2 }) {
                         Text(stringResource(R.string.yunx_locations))
                     }
                 }

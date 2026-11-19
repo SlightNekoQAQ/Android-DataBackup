@@ -1,0 +1,4 @@
+<resources>
+    <string name="restore_protocol">Protocols</string>
+    <string name="restore_cloud_pool">Cloud drives</string>
+</resources>

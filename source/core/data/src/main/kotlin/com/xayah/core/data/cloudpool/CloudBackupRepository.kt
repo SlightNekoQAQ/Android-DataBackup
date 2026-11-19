@@ -26,6 +26,7 @@ class CloudBackupRepository(context: Context) {
     }
 
     private fun configured(includeLegacy: Boolean = false): List<Configured> = checkUnique(vault.load().flatMapIndexed { slot, account ->
+        if (!YunxCredentialImport.supports(account.platform)) return@flatMapIndexed emptyList()
         val current = preferences.defaultFolder(slot)
         listOfNotNull(current, preferences.read(slot).takeIf { includeLegacy }).distinct().map { Configured(slot, account, it) }
     })
@@ -34,7 +35,8 @@ class CloudBackupRepository(context: Context) {
 
     /** Resolve the provider's folder ID from its root listing, not by assuming IDs are paths. */
     suspend fun prepareDestinations(): List<DestinationResult> = withContext(Dispatchers.IO) {
-        vault.load().mapIndexed { slot, account ->
+        vault.load().mapIndexedNotNull { slot, account ->
+            if (!YunxCredentialImport.supports(account.platform)) return@mapIndexedNotNull null
             val ready = try {
                 val drive = account.personalDrive(context)
                 suspend fun findFolder(): ShareFile? {
@@ -67,21 +69,39 @@ class CloudBackupRepository(context: Context) {
 
     fun lastConfirmedUpload(): String? = receipts.getString("snapshot-and-providers", null)
 
-    fun hasDestinations(): Boolean = vault.load().isNotEmpty()
+    fun hasDestinations(): Boolean = vault.load().any { YunxCredentialImport.supports(it.platform) }
 
     suspend fun publish(localRoot: File, password: CharArray, folders: Set<String>? = null, onProgress: (Int, Int) -> Unit = { _, _ -> }): CloudSnapshot.Published = withContext(Dispatchers.IO) {
-        val ready = prepareDestinations().filter { it.ready }.map { it.slot }.toSet()
-        val accounts = configured().filter { it.slot in ready }
-        require(accounts.isNotEmpty()) { "Could not locate or create /backup on any account" }
         val root = localRoot.canonicalFile
         val sources = (folders ?: setOf("apps", "files", "configs")).flatMap { category ->
             validateRelativePath(category)
             val base = File(root, category)
             if (!base.isDirectory) emptyList() else collect(root, base)
         }
+        val session = begin(password)
+        onProgress(0, sources.size)
+        sources.forEachIndexed { index, source ->
+            session.append(source.file, source.relativePath, deleteAfterUpload = false)
+            onProgress(index + 1, sources.size)
+        }
+        session.finish()
+    }
+
+    class UploadSession internal constructor(private val writer: CloudSnapshot.Writer, private val confirm: (CloudSnapshot.Published) -> Unit) {
+        suspend fun append(file: File, relativePath: String, deleteAfterUpload: Boolean = true) =
+            writer.append(CloudSnapshot.Source(relativePath, file), deleteAfterUpload)
+        suspend fun finish() = writer.finish().also(confirm)
+    }
+
+    suspend fun begin(password: CharArray): UploadSession = withContext(Dispatchers.IO) {
+        val ready = prepareDestinations().filter { it.ready }.map { it.slot }.toSet()
+        val accounts = configured().filter { it.slot in ready }
+        require(accounts.isNotEmpty()) { "Could not locate or create /backup on any account" }
         val drives = accounts.map { it.asDrive() }
-        val targets = drives.zip(accounts).map { (drive, account) -> drive.target(account.slot, preferences.speed(account.slot)) }
-        CloudSnapshot(drives, staging).publish(sources, targets, password, onProgress = onProgress).also { published ->
+        val manualOrder = preferences.manualOrder()
+        val ordered = uploadSlotOrder(accounts.map { it.slot }, manualOrder)
+        val targets = drives.zip(accounts).map { (drive, account) -> drive.target(ordered.indexOf(account.slot), preferences.speed(account.slot)) }
+        UploadSession(CloudSnapshot(drives, staging).begin(targets, password, useManualOrder = manualOrder != null)) { published ->
             val confirmedProviders = accounts.filter { it.key in published.manifestCopies }.map { it.account.platform }.distinct()
             receipts.edit().putString("snapshot-and-providers", "${published.id} · ${confirmedProviders.joinToString()}").apply()
         }

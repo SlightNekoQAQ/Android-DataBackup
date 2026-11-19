@@ -26,26 +26,53 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
     ): Published = withContext(Dispatchers.IO) {
         require(passphrase.size >= 8)
         require(sources.isNotEmpty() && sources.map(Source::relativePath).distinct().size == sources.size)
-        sources.forEach { validateRelativePath(it.relativePath); require(it.file.isFile && it.file.canRead()) }
-        val id = UUID.randomUUID().toString()
-        val transfer = CloudTransfer(drives)
-        val entries = ArrayList<CloudArchive>(sources.size)
-        check(privateStaging.isDirectory || privateStaging.mkdirs())
-        val temporary = File.createTempFile("manifest-", ".partial", privateStaging)
-        try {
-            onProgress(0, sources.size)
-            sources.forEachIndexed { index, source ->
-                // The user-visible archive path lives only in the encrypted manifest.
+        val writer = begin(targets, passphrase, useManualOrder)
+        onProgress(0, sources.size)
+        sources.forEachIndexed { index, source ->
+            writer.append(source)
+            onProgress(index + 1, sources.size)
+        }
+        writer.finish()
+    }
+
+    fun begin(targets: List<CloudTarget>, passphrase: CharArray, useManualOrder: Boolean = false): Writer {
+        require(passphrase.size >= 8)
+        return Writer(targets, passphrase, useManualOrder)
+    }
+
+    inner class Writer internal constructor(
+        private val targets: List<CloudTarget>, private val passphrase: CharArray, private val manual: Boolean,
+    ) {
+        private val id = UUID.randomUUID().toString()
+        private val transfer = CloudTransfer(drives)
+        private val entries = mutableListOf<CloudArchive>()
+        private var finished = false
+        private var failed = false
+
+        suspend fun append(source: Source, deleteAfterUpload: Boolean = false) = withContext(Dispatchers.IO) {
+            check(!finished && !failed)
+            try {
+                validateRelativePath(source.relativePath)
+                require(source.file.isFile && source.file.canRead() && entries.none { it.relativePath == source.relativePath })
+                check(privateStaging.isDirectory || privateStaging.mkdirs())
                 val encrypted = File.createTempFile("payload-", ".partial", privateStaging)
                 try {
                     CloudPayload.encrypt(source.file, encrypted, passphrase, source.relativePath)
-                    entries += transfer.store(encrypted, source.relativePath, "db-$id-$index.bin", targets, useManualOrder)
-                } finally {
-                    encrypted.delete()
-                }
-                onProgress(index + 1, sources.size)
+                    entries += transfer.store(encrypted, source.relativePath, "db-$id-${entries.size}.bin", targets, manual)
+                    if (deleteAfterUpload && !source.file.delete()) throw IOException("Cannot clean up uploaded temporary archive")
+                } finally { encrypted.delete() }
+            } catch (error: Exception) {
+                failed = true
+                throw error
             }
-            temporary.writeBytes(CloudManifest.encode(entries, passphrase))
+        }
+
+        suspend fun finish(): Published = withContext(Dispatchers.IO) {
+            check(!finished && !failed && entries.isNotEmpty())
+            finished = true
+            val temporary = File.createTempFile("manifest-", ".partial", privateStaging)
+            try {
+                temporary.writeBytes(CloudManifest.encode(entries, passphrase))
             val copies = linkedMapOf<String, String>()
             val missing = linkedSetOf<String>()
             val used = entries.map(CloudArchive::accountId).toSet()
@@ -61,9 +88,10 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
                 }
             }
             if (copies.isEmpty()) throw IOException("Cloud backup has no recoverable manifest")
-            Published(id, copies, missing)
-        } finally {
-            temporary.delete()
+                Published(id, copies, missing)
+            } finally {
+                temporary.delete()
+            }
         }
     }
 

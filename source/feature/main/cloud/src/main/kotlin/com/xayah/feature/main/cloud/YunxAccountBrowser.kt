@@ -33,13 +33,10 @@ import kotlinx.coroutines.withContext
 internal fun providerName(platform: String): String = when (platform) {
     "quark" -> "夸克网盘"
     "uc" -> "UC 网盘"
-    "xunlei" -> "迅雷网盘"
     "baidu" -> "百度网盘"
     "c139" -> "139 网盘"
     "pan123" -> "123 云盘"
     "pan115" -> "115 网盘"
-    "guangya" -> "光鸭云盘"
-    "ilanzou" -> "蓝奏云优享版"
     else -> platform
 }
 

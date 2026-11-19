@@ -1,0 +1,4 @@
+<resources>
+    <string name="restore_protocol">标准协议</string>
+    <string name="restore_cloud_pool">网盘容量池</string>
+</resources>

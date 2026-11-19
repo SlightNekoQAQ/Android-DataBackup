@@ -80,6 +80,7 @@ internal abstract class AbstractBackupService : AbstractMediumService() {
         NotificationUtil.notify(mContext, mNotificationBuilder, mContext.getString(R.string.backing_up), mContext.getString(R.string.preprocessing))
     }
 
+    protected open val registerLocalRestore: Boolean get() = true
     protected open suspend fun onTargetDirsCreated() {}
     protected open suspend fun onFileDirCreated(archivesRelativeDir: String): Boolean = true
     abstract suspend fun backup(m: MediaEntity, r: MediaEntity?, t: TaskDetailMediaEntity, dstDir: String)
@@ -140,7 +141,7 @@ internal abstract class AbstractBackupService : AbstractMediumService() {
                         val configDst = PathUtil.getMediaRestoreConfigDst(dstDir = dstDir)
                         mRootService.writeJson(data = restoreEntity, dst = configDst)
                         onConfigSaved(path = configDst, archivesRelativeDir = m.archivesRelativeDir)
-                        mMediaDao.upsert(restoreEntity)
+                        if (registerLocalRestore) mMediaDao.upsert(restoreEntity)
                         mMediaDao.upsert(m)
                         media.update(mediaEntity = m)
                         mTaskEntity.update(successCount = mTaskEntity.successCount + 1)

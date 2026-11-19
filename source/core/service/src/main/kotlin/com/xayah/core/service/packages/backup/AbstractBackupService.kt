@@ -96,6 +96,7 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
         NotificationUtil.notify(mContext, mNotificationBuilder, mContext.getString(R.string.backing_up), mContext.getString(R.string.preprocessing))
     }
 
+    protected open val registerLocalRestore: Boolean get() = true
     protected open suspend fun onTargetDirsCreated() {}
     protected open suspend fun onAppDirCreated(archivesRelativeDir: String): Boolean = true
     abstract suspend fun backup(type: DataType, p: PackageEntity, r: PackageEntity?, t: TaskDetailPackageEntity, dstDir: String)
@@ -182,7 +183,7 @@ internal abstract class AbstractBackupService : AbstractPackagesService() {
                         val configDst = PathUtil.getPackageRestoreConfigDst(dstDir = dstDir)
                         mRootService.writeJson(data = restoreEntity, dst = configDst)
                         onConfigSaved(path = configDst, archivesRelativeDir = p.archivesRelativeDir)
-                        mPackageDao.upsert(restoreEntity)
+                        if (registerLocalRestore) mPackageDao.upsert(restoreEntity)
                         mPackageDao.upsert(p)
                         pkg.update(packageEntity = p)
                         mTaskEntity.update(successCount = mTaskEntity.successCount + 1)

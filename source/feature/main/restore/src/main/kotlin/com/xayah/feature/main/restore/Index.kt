@@ -89,7 +89,7 @@ fun PageRestore() {
             )
 
             var enabled by remember { mutableStateOf(true) }
-            val storageOptions = remember { listOf(context.getString(R.string.local), context.getString(R.string.cloud)) }
+            val storageOptions = listOf(stringResource(R.string.local), stringResource(R.string.restore_protocol), stringResource(R.string.restore_cloud_pool))
             SingleChoiceSegmentedButtonRow(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -103,7 +103,7 @@ fun PageRestore() {
                         onClick = {
                             viewModel.launchOnIO {
                                 enabled = false
-                                viewModel.emitState(state = uiState.copy(storageIndex = index, storageType = if (index == 0) StorageMode.Local else StorageMode.Cloud))
+                                viewModel.emitState(state = uiState.copy(storageIndex = index, storageType = if (index == 1) StorageMode.Cloud else StorageMode.Local))
                                 viewModel.emitIntent(IndexUiIntent.UpdateApps)
                                 viewModel.emitIntent(IndexUiIntent.UpdateFiles)
                                 enabled = true
@@ -114,6 +114,11 @@ fun PageRestore() {
                         Text(label)
                     }
                 }
+            }
+
+            if (uiState.storageIndex == 2) {
+                com.xayah.feature.main.cloud.CloudSnapshotActions(uploadEnabled = false)
+                return@Column
             }
 
             AnimatedVisibility(uiState.storageIndex == 1) {
