@@ -35,13 +35,10 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
     private val xunlei by lazy { XunleiApi() }
     private val guangya by lazy { GuangYaApi().apply { deviceIdProvider = { deviceId } } }
     private val ilanzou by lazy { ILanzouApi() }
-    private val lanzou by lazy { LanzouApi() }
-    private suspend fun lanzouParams() = lanzou.fetchLoginParams(cookie) ?: throw IOException("蓝奏云登录态失效")
 
     val rootId: String get() = when (platform) {
         "baidu", "c139" -> "/"
         "guangya", "xunlei" -> ""
-        "lanzou" -> "-1"
         else -> "0"
     }
 
@@ -66,13 +63,11 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
             "xunlei" -> xunlei.getFiles(parent, token, deviceId, captcha).orEmpty()
             "guangya" -> guangya.listCloudFiles(token, parent)
             "ilanzou" -> ilanzou.listFiles(appToken, uuid, parent)
-            "lanzou" -> lanzouParams().let { lanzou.listCloudFiles(cookie, it.uid, it.vei, parent) }
             else -> unsupported()
         }
     }
 
     val maxFileBytes: Long? get() = if (platform == "pan115") Pan115Constants.UPLOAD_MAX_SIZE else null
-    val supportsPrivateRestore: Boolean get() = platform != "lanzou"
 
     suspend fun quota(): QuotaInfo? = when (platform) {
         "quark" -> quark.getQuota(cookie)
@@ -84,7 +79,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
         "xunlei" -> xunlei.getQuota(token, deviceId, captcha)
         "guangya" -> guangya.getQuota(token, GuangYaDevice(deviceId, field("deviceSign")))
         "ilanzou" -> ilanzou.getQuota(appToken, uuid)
-        "lanzou" -> null
         else -> unsupported()
     }
 
@@ -100,7 +94,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
             "xunlei" -> xunlei.createFolder(name, parent, token, deviceId, captcha)
             "guangya" -> guangya.createDir(token, parent, name)
             "ilanzou" -> ilanzou.createDir(appToken, uuid, parent, name)
-            "lanzou" -> lanzouParams().let { lanzou.createFolder(cookie, it.uid, it.vei, parent, name) }
             else -> unsupported()
         }?.takeIf(String::isNotBlank) ?: throw IOException("无法创建网盘备份目录")
     }
@@ -118,7 +111,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
             "xunlei" -> xunlei.upload(io, source, parent, token, deviceId, captcha)
             "guangya" -> guangya.upload(io, source, parent, token)
             "ilanzou" -> ilanzou.upload(io, source, parent, appToken, uuid)
-            "lanzou" -> lanzouParams().let { lanzou.upload(io, source, parent, cookie, it.uid, it.vei) }
             else -> unsupported()
         }
         // Some APIs return an upload-session ID or nothing (e.g. when deduplicated). Always confirm
@@ -148,7 +140,6 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
             "xunlei" -> xunlei.getFileDetail(file.fid, token, deviceId, captcha)
             "guangya" -> guangya.getDownloadLink(token, file)
             "ilanzou" -> ilanzou.getDownloadLink(appToken, uuid, file.fid.removePrefix(ILanzouConstants.FILE_PREFIX), required("userId"))
-            "lanzou" -> throw IOException("蓝奏云暂未提供已验证的私有下载方式")
             else -> unsupported()
         }?.takeIf { it.downloadUrl.startsWith("https://") && !it.isHls }
             ?: throw IOException("网盘未返回可用的原始文件下载地址")

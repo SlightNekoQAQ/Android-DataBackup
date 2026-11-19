@@ -92,14 +92,18 @@ class CloudPoolTest {
         assertThrows(IllegalArgumentException::class.java) { CloudManifest.encode(listOf(entry, entry), passphrase) }
     }
 
-    @Test fun parsesAllTenPlatformRecordsAndSkipsNonDriveCredentials() {
+    @Test fun parsesNineSupportedDrivesAndSkipsOtherCredentials() {
         val platforms = mapOf(
             "quark" to "cookie", "uc" to "cookie", "xunlei" to "accessToken", "baidu" to "cookie",
             "c139" to "cookie", "pan123" to "accessToken", "pan115" to "cookie", "guangya" to "accessToken",
-            "ilanzou" to "appToken", "lanzou" to "cookie",
+            "ilanzou" to "appToken",
         )
         val entries = platforms.map { (platform, key) -> """{"platform":"$platform","$key":"example-secret"}""" } +
-            listOf("""{"platform":"video_bilibili","cookie":"ignored"}""", """{"platform":"quark","cookie":""}""")
+            listOf(
+                """{"platform":"video_bilibili","cookie":"ignored"}""",
+                """{"platform":"lanzou","cookie":"ignored"}""",
+                """{"platform":"quark","cookie":""}""",
+            )
         val export = """{"app":"yunx_auth_backup","version":1,"githubToken":"ignored","accounts":[${entries.joinToString(",")}]}"""
         val accounts = YunxCredentialImport.parse(export)
         assertEquals(platforms.keys.toList(), accounts.map { it.platform })

@@ -23,13 +23,12 @@ class YunxCloudDrive(
     }
 
     suspend fun target(priority: Int, measuredBytesPerSecond: Long?): CloudTarget {
-        val quota = if (drive.supportsPrivateRestore) drive.quota() else null
+        val quota = drive.quota()
         val free = quota?.let { if (it.total <= 0 || it.used < 0) null else (it.total - it.used).coerceAtLeast(0) }
-        return CloudTarget(accountId, priority, measuredBytesPerSecond, free, drive.maxFileBytes, drive.supportsPrivateRestore)
+        return CloudTarget(accountId, priority, measuredBytesPerSecond, free, drive.maxFileBytes)
     }
 
     override suspend fun upload(source: File, remoteName: String): String {
-        check(drive.supportsPrivateRestore) { "Provider cannot privately restore backups" }
         val max = drive.maxFileBytes
         if (max != null && source.length() > max) throw CloudCapacityException("Archive exceeds provider size limit")
         return drive.upload(directoryId, source, remoteName)

@@ -37,7 +37,6 @@ object YunxCredentialImport {
         "pan115" to schema("cookie"),
         "guangya" to schema("accessToken", "refreshToken", "deviceId", "deviceSign", "account"),
         "ilanzou" to schema("appToken", "uuid", "account", "password", "userId"),
-        "lanzou" to schema("cookie"),
     )
 
     fun parse(content: String, password: CharArray? = null): List<ImportedCloudAccount> {
