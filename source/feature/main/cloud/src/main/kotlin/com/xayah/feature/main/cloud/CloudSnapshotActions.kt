@@ -34,7 +34,11 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun CloudSnapshotActions(uploadEnabled: Boolean = true, onRestore: (suspend (File) -> Unit)? = null) {
+fun CloudSnapshotActions(
+    uploadEnabled: Boolean = true,
+    onRestore: (suspend (File) -> Unit)? = null,
+    onMissing: (List<com.xayah.core.data.cloudpool.CloudArchive>) -> Unit = {},
+) {
     val restoreEnabled = onRestore != null
     val context = LocalContext.current.applicationContext
     val repository = remember(context) { CloudBackupRepository(context) }
@@ -154,8 +158,10 @@ fun CloudSnapshotActions(uploadEnabled: Boolean = true, onRestore: (suspend (Fil
                             receipt = repository.lastConfirmedUpload()
                             if (result.missingCopies.isEmpty()) complete else incomplete
                         } else if (action == 1) {
-                            verifiedFolder = repository.restore(checkNotNull(backup)) { done, total -> progressUpdates.value = done to total }
-                            restored
+                            val result = repository.restoreAvailable(checkNotNull(backup)) { done, total -> progressUpdates.value = done to total }
+                            verifiedFolder = result.folder
+                            onMissing(result.missing)
+                            if (result.missing.isEmpty()) restored else "${restored}: ${result.missing.size} 个档案未恢复"
                         } else {
                             locations = repository.locations(checkNotNull(backup))
                             ""

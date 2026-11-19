@@ -12,6 +12,12 @@ import javax.crypto.spec.SecretKeySpec
 /** Credentials are deliberately excluded from the object's string representation. */
 class ImportedCloudAccount internal constructor(val platform: String, val nickname: String, fields: Map<String, String>) {
     private val credentials = fields.toMap()
+    /** Provider-verified identity is resolved asynchronously before this account is used. */
+    val identity: String = when (platform) {
+        "c139" -> com.yunx.app.data.network.C139Constants.extractAccountFull(credentials["cookie"].orEmpty())
+        "pan123" -> credentials["account"]
+        else -> nickname
+    }?.trim()?.takeIf(String::isNotEmpty).orEmpty()
     fun credential(name: String): String? = credentials[name]
     internal fun credentialFields(): Map<String, String> = credentials.toMap()
     fun personalDrive(context: android.content.Context) = com.yunx.app.data.network.PersonalDrive(context, platform, credentials)
@@ -32,7 +38,7 @@ object YunxCredentialImport {
         "quark" to schema("cookie"),
         "uc" to schema("cookie"),
         "baidu" to schema("cookie"),
-        "c139" to schema("cookie", "authorization"),
+        "c139" to schema("cookie", "authorization", "account"),
         "pan123" to schema("accessToken", "account"),
         "pan115" to schema("cookie"),
 

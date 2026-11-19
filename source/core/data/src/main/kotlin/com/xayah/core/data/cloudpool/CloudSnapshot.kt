@@ -27,8 +27,10 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         private val id = UUID.randomUUID().toString()
         private val transfer = CloudTransfer(drives)
         private val entries = mutableListOf<CloudArchive>()
-        private fun identity(accountId: String): String =
-            (drives.single { it.accountId == accountId } as? YunxCloudDrive)?.stableIdentity ?: accountId
+        private suspend fun identity(accountId: String): String {
+            val drive = drives.single { it.accountId == accountId }
+            return (drive as? YunxCloudDrive)?.verifiedAccountIdentity() ?: accountId
+        }
         private var finished = false
         private var failed = false
 

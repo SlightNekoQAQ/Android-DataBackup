@@ -24,6 +24,8 @@ data class CloudArchive(
     val fileId: String,
     val byteCount: Long,
     val sha256: String,
+    /** Stable account identity verified by YunX, not a local account-list position. */
+    val accountIdentity: String = accountId,
 )
 
 /** One sequential writer per backup session. Archive sources must be finalized and immutable. */
@@ -62,7 +64,7 @@ class CloudTransfer(drives: Collection<CloudDrive>) {
             }
             check(id.isNotBlank()) { "Upload returned no file reference" }
             sessionBytes[target.accountId] = newTotal
-            return CloudArchive(relativePath, target.accountId, id, size, digest)
+            return CloudArchive(relativePath, target.accountId, id, size, digest, target.accountId)
         }
         throw CloudCapacityException("No writable cloud account can fit this archive")
     }

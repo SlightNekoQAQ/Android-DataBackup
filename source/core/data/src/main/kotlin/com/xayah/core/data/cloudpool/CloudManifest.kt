@@ -37,7 +37,7 @@ object CloudManifest {
         require(archives.isNotEmpty() && archives.map(CloudArchive::relativePath).distinct().size == archives.size)
         archives.forEach {
             validateRelativePath(it.relativePath)
-            require(it.accountId.isNotBlank() && it.fileId.isNotBlank() && it.byteCount >= 0)
+            require(it.accountId.isNotBlank() && it.accountIdentity.isNotBlank() && it.fileId.isNotBlank() && it.byteCount >= 0)
             require(it.sha256.matches(Regex("[0-9a-f]{64}")))
         }
     }
@@ -51,11 +51,12 @@ object CloudManifest {
     private class WireArchive(
         @SerializedName("path") val path: String,
         @SerializedName("account") val account: String,
+        @SerializedName("identity") val identity: String,
         @SerializedName("object") val remoteObject: String,
         @SerializedName("bytes") val bytes: Long,
         @SerializedName("sha256") val sha256: String,
     ) {
-        constructor(archive: CloudArchive) : this(archive.relativePath, archive.accountId, archive.fileId, archive.byteCount, archive.sha256)
-        fun toArchive() = CloudArchive(path, account, remoteObject, bytes, sha256)
+        constructor(archive: CloudArchive) : this(archive.relativePath, archive.accountId, archive.accountIdentity, archive.fileId, archive.byteCount, archive.sha256)
+        fun toArchive() = CloudArchive(path, account, remoteObject, bytes, sha256, identity)
     }
 }

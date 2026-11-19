@@ -121,8 +121,14 @@ fun PageRestore() {
 
             if (uiState.storageIndex == 2) {
                 var indexed by remember { mutableStateOf<Pair<String, List<Target>>?>(null) }
-                com.xayah.feature.main.cloud.CloudSnapshotActions(uploadEnabled = false) { folder ->
-                    indexed = folder.canonicalPath to viewModel.indexCloudSnapshot(folder)
+                var missing by remember { mutableStateOf<List<String>>(emptyList()) }
+                com.xayah.feature.main.cloud.CloudSnapshotActions(
+                    uploadEnabled = false,
+                    onRestore = { folder -> indexed = folder.canonicalPath to viewModel.indexCloudSnapshot(folder) },
+                    onMissing = { unavailable -> missing = unavailable.map { it.relativePath }.distinct() },
+                )
+                if (missing.isNotEmpty()) {
+                    Clickable(readOnly = true, title = "部分项目未下载：${missing.joinToString()}（所需网盘账号未连接或档案不可用）")
                 }
                 indexed?.let { (path, targets) ->
                     targets.forEach { target ->

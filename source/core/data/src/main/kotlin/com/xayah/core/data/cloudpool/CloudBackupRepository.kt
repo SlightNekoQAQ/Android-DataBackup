@@ -15,21 +15,34 @@ class CloudBackupRepository(context: Context) {
     private val vault = CloudAccountVault(this.context)
     private val preferences = CloudDestinationPreferences(this.context)
 
-    private data class Configured(val slot: Int, val account: ImportedCloudAccount, val folder: String) {
-        val key = "${account.platform}:$folder"
+    private inner class Configured(val slot: Int, val account: ImportedCloudAccount, val folder: String, val identity: String) {
+        // Stable manifest identity and provider-local folder route are distinct identifiers.
+        val key: String get() = identity
+        val driveId: String get() = "${account.platform}:$folder"
+        fun asDrive() = YunxCloudDrive(context, account, driveId, folder, preferences.connections(slot))
     }
 
     data class RemoteBackup(val label: String, val provider: String, val accountKey: String, val objectId: String)
 
     private fun checkUnique(destinations: List<Configured>): List<Configured> = destinations.also {
-        require(it.map { item -> item.key }.distinct().size == it.size) { "Duplicate backup destinations" }
+        require(it.map { item -> item.driveId }.distinct().size == it.size) { "Duplicate cloud drive destinations" }
     }
 
-    private fun configured(includeLegacy: Boolean = false): List<Configured> = checkUnique(vault.load().flatMapIndexed { slot, account ->
-        if (!YunxCredentialImport.supports(account.platform)) return@flatMapIndexed emptyList()
-        val current = preferences.defaultFolder(slot)
-        listOfNotNull(current, preferences.read(slot).takeIf { includeLegacy }).distinct().map { Configured(slot, account, it) }
-    })
+    private suspend fun configured(includeLegacy: Boolean = false, verifyIdentity: Boolean = true): List<Configured> {
+        val accounts = vault.load().mapIndexedNotNull { slot, account ->
+            if (!YunxCredentialImport.supports(account.platform)) return@mapIndexedNotNull null
+            val folder = preferences.defaultFolder(slot) ?: preferences.read(slot).takeIf { includeLegacy } ?: return@mapIndexedNotNull null
+            val identity = if (!verifyIdentity) "${account.platform}:${account.identity.ifBlank { slot.toString() }}" else try {
+                "${account.platform}:${account.verifiedIdentity(context)}"
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                "${account.platform}:unverified:${account.identity.ifBlank { slot.toString() }}"
+            }
+            Configured(slot, account, folder, identity)
+        }
+        return checkUnique(accounts)
+    }
 
     data class DestinationResult(val slot: Int, val ready: Boolean)
 
@@ -63,7 +76,6 @@ class CloudBackupRepository(context: Context) {
         }
     }
 
-    private fun Configured.asDrive() = YunxCloudDrive(context, account, key, folder, preferences.connections(slot))
 
     private val receipts = this.context.getSharedPreferences("cloud-backup-receipts", Context.MODE_PRIVATE)
 
@@ -97,6 +109,7 @@ class CloudBackupRepository(context: Context) {
         val ready = prepareDestinations().filter { it.ready }.map { it.slot }.toSet()
         val accounts = configured().filter { it.slot in ready }
         require(accounts.isNotEmpty()) { "Could not locate or create /backup on any account" }
+        require(accounts.none { ":unverified:" in it.identity }) { "Could not verify one or more cloud accounts; re-import them from YunX" }
         val drives = accounts.map { it.asDrive() }
         val manualOrder = preferences.manualOrder()
         val ordered = uploadSlotOrder(accounts.map { it.slot }, manualOrder)
@@ -104,7 +117,7 @@ class CloudBackupRepository(context: Context) {
         // "unknown", not "full"; only explicit provider rejections cause failover at upload time.
         val targets = drives.zip(accounts).map { (drive, account) ->
             CloudTarget(
-                accountId = account.key,
+                accountId = account.driveId,
                 priority = ordered.indexOf(account.slot),
                 downloadBytesPerSecond = preferences.speed(account.slot),
                 freeBytes = runCatching { drive.quotaSnapshot() }.getOrNull(),
@@ -112,7 +125,7 @@ class CloudBackupRepository(context: Context) {
             )
         }
         UploadSession(CloudSnapshot(drives, staging).begin(targets, useManualOrder = manualOrder != null)) { published ->
-            val confirmedProviders = accounts.filter { it.key in published.manifestCopies }.map { it.account.platform }.distinct()
+            val confirmedProviders = accounts.filter { it.driveId in published.manifestCopies }.map { it.account.platform }.distinct()
             receipts.edit().putString("snapshot-and-providers", "${published.id} · ${confirmedProviders.joinToString()}").apply()
         }
     }
@@ -137,43 +150,84 @@ class CloudBackupRepository(context: Context) {
     }
 
     suspend fun available(): List<RemoteBackup> = withContext(Dispatchers.IO) {
-        if (configured().isEmpty()) prepareDestinations()
-        val accounts = configured(includeLegacy = true)
-        val providers = accounts.associate { it.key to it.account.platform }
-        CloudRecovery(accounts.map { it.asDrive() }, staging).discover().map {
-            RemoteBackup(it.remote.name, providers.getValue(it.accountId), it.accountId, it.remote.id)
-        }
-    }
-
-    data class FileLocation(val original: String, val provider: String, val account: String, val remoteName: String?, val folder: String)
-
-    suspend fun locations(backup: RemoteBackup): List<FileLocation> = withContext(Dispatchers.IO) {
-        val accounts = configured(includeLegacy = true)
-        val manifest = CloudRecovery(accounts.map { it.asDrive() }, staging).readManifest(backup.accountKey, backup.objectId)
-        val archives = CloudManifest.decode(manifest)
-        val locations = mutableMapOf<String, Map<String, String>>()
-        for (account in accounts.filter { target -> archives.any { it.accountId == target.key } }) {
+        if (configured(verifyIdentity = false).isEmpty()) prepareDestinations()
+        val accounts = configured(includeLegacy = true, verifyIdentity = true)
+        val found = mutableListOf<RemoteBackup>()
+        for (account in accounts) {
             try {
-                locations[account.key] = account.account.personalDrive(context).list(account.folder)
-                    .filterNot { it.isdir }.associate { it.fid to it.fname }
+                CloudRecovery(listOf(account.asDrive()), staging).discover().forEach {
+                    found += RemoteBackup(it.remote.name, account.account.platform, account.driveId, it.remote.id)
+                }
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
-                // Keep showing other disks when one account cannot be listed.
+                // A wrong/expired account must not hide backups found through other accounts.
             }
         }
-        archives.map { archive ->
-            val account = accounts.firstOrNull { it.key == archive.accountId }
-            FileLocation(archive.relativePath, archive.accountId.substringBefore(':'), account?.account?.nickname.orEmpty(),
-                locations[archive.accountId]?.get(archive.fileId),
-                if (account != null && preferences.defaultFolder(account.slot) == account.folder) "/backup" else "")
-        }
+        found.distinctBy { it.label.removePrefix("db-").substringBefore('-') }
     }
 
-    suspend fun restore(backup: RemoteBackup, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
-        val drives = configured(includeLegacy = true).map { it.asDrive() }
-        CloudRecovery(drives, staging).restore(backup.accountKey, backup.objectId, onProgress)
+    data class FileLocation(
+        val original: String,
+        val provider: String,
+        val account: String,
+        val remoteName: String?,
+        val folder: String,
+        val accountIdentity: String = "",
+        val available: Boolean = false,
+    )
+
+    data class SnapshotContents(val entries: List<FileLocation>, val missingAccounts: Set<String>)
+
+    /** Read the snapshot index from any logged-in account, then diagnose each required account. */
+    suspend fun locations(backup: RemoteBackup): List<FileLocation> = snapshotContents(backup).entries
+
+    suspend fun snapshotContents(backup: RemoteBackup): SnapshotContents = withContext(Dispatchers.IO) {
+        val allAccounts = configured(includeLegacy = true)
+        val manifestOwner = allAccounts.singleOrNull { it.driveId == backup.accountKey }
+            ?: throw IOException("The account containing this backup index is not connected")
+        val manifest = CloudRecovery(listOf(manifestOwner.asDrive()), staging).readManifest(manifestOwner.driveId, backup.objectId)
+        val archives = CloudManifest.decode(manifest)
+        val byIdentity = allAccounts.associateBy { it.identity }
+        val entries = archives.map { archive ->
+            val requiredIdentity = archive.accountIdentity
+            val account = byIdentity[requiredIdentity]
+            FileLocation(archive.relativePath, requiredIdentity.substringBefore(':'), account?.account?.nickname.orEmpty(),
+                null, account?.folder?.let { "/backup" }.orEmpty(), requiredIdentity, account != null)
+        }
+        SnapshotContents(entries, archives.map { it.accountIdentity }.toSet() - byIdentity.keys)
     }
+
+    data class RestoreResult(val folder: File, val missing: List<CloudArchive>)
+
+    /** Restore only payloads whose verified account is present; report the rest to the caller. */
+    suspend fun restoreAvailable(backup: RemoteBackup, onProgress: (Int, Int) -> Unit = { _, _ -> }): RestoreResult = withContext(Dispatchers.IO) {
+        val allAccounts = configured(includeLegacy = true)
+        val manifestOwner = allAccounts.singleOrNull { it.driveId == backup.accountKey }
+            ?: throw IOException("The account containing this backup index is not connected")
+        val accounts = allAccounts
+        val manifest = CloudRecovery(listOf(manifestOwner.asDrive()), staging).readManifest(manifestOwner.driveId, backup.objectId)
+        val archives = CloudManifest.decode(manifest)
+        val byIdentity = accounts.associateBy { it.identity }
+        val missing = archives.filter { it.accountIdentity !in byIdentity }
+        val accessibleArchives = archives.filter { it.accountIdentity in byIdentity }
+        val accessibleDrives = accessibleArchives.mapNotNull { archive ->
+            val account = byIdentity.getValue(archive.accountIdentity)
+            account.asDrive()
+        }.distinctBy { it.accountId }
+        if (accessibleArchives.isEmpty()) {
+            check(staging.isDirectory || staging.mkdirs())
+            val emptyFolder = File(staging, "snapshot-empty-${java.util.UUID.randomUUID()}")
+            check(emptyFolder.mkdirs())
+            return@withContext RestoreResult(emptyFolder, missing)
+        }
+        val accessibleIndex = CloudManifest.encode(accessibleArchives)
+        val retrieval = CloudSnapshot(accessibleDrives, staging).retrieveAvailable(accessibleIndex, onProgress)
+        RestoreResult(retrieval.folder, missing + retrieval.unavailable)
+    }
+
+    suspend fun restore(backup: RemoteBackup, onProgress: (Int, Int) -> Unit = { _, _ -> }): File =
+        restoreAvailable(backup, onProgress).folder
 
     private fun collect(root: File, directory: File): List<CloudSnapshot.Source> {
         if (directory.absoluteFile != directory.canonicalFile) throw IOException("Backup path is not a regular directory")
