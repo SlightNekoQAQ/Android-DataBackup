@@ -27,6 +27,8 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         private val id = UUID.randomUUID().toString()
         private val transfer = CloudTransfer(drives)
         private val entries = mutableListOf<CloudArchive>()
+        private fun identity(accountId: String): String =
+            (drives.single { it.accountId == accountId } as? YunxCloudDrive)?.stableIdentity ?: accountId
         private var finished = false
         private var failed = false
 
@@ -36,8 +38,12 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
                 validateRelativePath(source.relativePath)
                 require(source.file.isFile && source.file.canRead() && entries.none { it.relativePath == source.relativePath })
                 // The user-visible archive path lives in the index; payloads stay flat and opaque.
-                entries += transfer.store(source.file, source.relativePath, "db-$id-${entries.size}.bin", targets, manual)
+                val uploaded = transfer.store(source.file, source.relativePath, "db-$id-${entries.size}.bin", targets, manual)
+                entries += uploaded.copy(accountIdentity = identity(uploaded.accountId))
                 afterConfirmedUpload()
+            } catch (error: CancellationException) {
+                failed = true
+                throw error
             } catch (error: Exception) {
                 failed = true
                 throw error
@@ -53,8 +59,10 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
                 temporary.writeBytes(CloudManifest.encode(entries))
                 val copies = linkedMapOf<String, String>()
                 val missing = linkedSetOf<String>()
-                val used = entries.map(CloudArchive::accountId).toSet()
-                for (drive in drives.filter { it.accountId in used }) {
+                // Replicate the complete recovery index to every participating drive. Payloads
+                // remain single-copy for capacity; an index on any one drive is enough to discover
+                // the snapshot and explain which other accounts are required.
+                for (drive in drives) {
                     try {
                         val reference = drive.upload(temporary, "db-$id-${CloudManifest.FILE_NAME}")
                         if (reference.isBlank()) throw IOException("Provider did not confirm index upload")
@@ -73,12 +81,14 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         }
     }
 
-    /** Downloads verified files to a new tree. An incomplete tree never reaches the restore caller. */
-    suspend fun retrieve(manifest: ByteArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
+    data class RetrievalResult(val folder: File, val unavailable: List<CloudArchive>)
+
+    /** Downloads available verified files to a new tree and reports archives that could not be retrieved. */
+    suspend fun retrieveAvailable(manifest: ByteArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): RetrievalResult = withContext(Dispatchers.IO) {
         val archives = CloudManifest.decode(manifest)
-        val missing = archives.map(CloudArchive::accountId).toSet() - drives.map(CloudDrive::accountId).toSet()
-        if (missing.isNotEmpty()) throw IOException("One or more required cloud accounts are unavailable")
+        require(archives.isNotEmpty()) { "No archives are available for restore" }
         val staging = File(privateStaging, "snapshot-${UUID.randomUUID()}")
+        check(privateStaging.isDirectory || privateStaging.mkdirs())
         check(staging.mkdirs())
         val transfer = CloudTransfer(drives)
         try {
@@ -86,20 +96,30 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
             val slots = Semaphore(3)
             val progressLock = Any()
             var completed = 0
+            val unavailable = java.util.Collections.synchronizedList(mutableListOf<CloudArchive>())
             coroutineScope {
-                archives.groupBy(CloudArchive::accountId).values.map { accountArchives ->
+                archives.map { archive ->
                     async {
-                        for (archive in accountArchives) slots.withPermit {
-                            transfer.retrieve(archive, staging)
+                        slots.withPermit {
+                            try {
+                                transfer.retrieve(archive, staging)
+                            } catch (error: CancellationException) {
+                                throw error
+                            } catch (_: Exception) {
+                                unavailable += archive
+                            }
                             synchronized(progressLock) { onProgress(++completed, archives.size) }
                         }
                     }
                 }.awaitAll()
             }
-            staging
+            RetrievalResult(staging, unavailable.toList())
         } catch (error: Exception) {
             staging.deleteRecursively()
             throw error
         }
     }
+
+    suspend fun retrieve(manifest: ByteArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File =
+        retrieveAvailable(manifest, onProgress).folder
 }

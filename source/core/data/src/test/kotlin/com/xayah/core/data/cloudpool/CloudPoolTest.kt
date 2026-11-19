@@ -112,6 +112,10 @@ class CloudPoolTest {
             MemoryDrive("fast", objects = first.objects)), temporary.newFolder())
         val references = recovery.discover()
         assertEquals(2, references.size)
+        // The complete index is copied to every configured destination, including a drive
+        // that did not receive a payload, so any participating account can discover the snapshot.
+        assertEquals(1, first.objects.keys.count { it.endsWith(CloudManifest.FILE_NAME) })
+        assertEquals(1, second.objects.keys.count { it.endsWith(CloudManifest.FILE_NAME) })
         val selected = references.first()
         val progress = mutableListOf<Pair<Int, Int>>()
         val restored = recovery.restore(selected.accountId, selected.remote.id) { done, total ->
@@ -141,9 +145,10 @@ class CloudPoolTest {
     }
 
     @Test fun manifestRoundTripsAndRejectsDuplicates() {
-        val entry = CloudArchive("apps/app/archive", "account", "file", 42, "a".repeat(64))
+        val entry = CloudArchive("apps/app/archive", "account", "file", 42, "a".repeat(64), "verified-account")
         val encoded = CloudManifest.encode(listOf(entry))
         assertEquals(listOf(entry), CloudManifest.decode(encoded))
+        assertTrue(String(encoded, Charsets.UTF_8).contains("verified-account"))
         // The index is plain JSON on purpose: recovery must not require a user-supplied secret.
         assertTrue(String(encoded, Charsets.UTF_8).contains("databackup-cloud-index"))
         assertThrows(IllegalArgumentException::class.java) { CloudManifest.encode(listOf(entry, entry)) }
@@ -158,7 +163,14 @@ class CloudPoolTest {
             "quark" to "cookie", "uc" to "cookie", "baidu" to "cookie",
             "c139" to "cookie", "pan123" to "accessToken", "pan115" to "cookie",
         )
-        val entries = platforms.map { (platform, key) -> """{"platform":"$platform","$key":"example-secret"}""" } +
+        val entries = platforms.map { (platform, key) ->
+            val extra = when (platform) {
+                "pan123" -> ",\"account\":\"123-user\",\"nickname\":\"123-user\""
+                "c139" -> ",\"account\":\"139-user\",\"nickname\":\"139-user\""
+                else -> ",\"nickname\":\"$platform-user\""
+            }
+            """{"platform":"$platform","$key":"example-secret"$extra}"""
+        } +
             listOf(
                 """{"platform":"video_bilibili","cookie":"ignored"}""",
                 """{"platform":"lanzou","cookie":"ignored"}""",
@@ -173,6 +185,7 @@ class CloudPoolTest {
         accounts.forEach {
             assertEquals("example-secret", it.credential(platforms.getValue(it.platform)))
             assertFalse(it.toString().contains("example-secret"))
+            assertEquals(when (it.platform) { "pan123" -> "123-user"; "c139" -> "139-user"; else -> "${it.platform}-user" }, it.identity)
             assertEquals(null, it.credential("githubToken"))
         }
     }
