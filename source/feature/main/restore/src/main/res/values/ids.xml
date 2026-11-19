@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
     <item name="restore" type="string" />
     <item name="never" type="string" />
     <item name="last_backup" type="string" />

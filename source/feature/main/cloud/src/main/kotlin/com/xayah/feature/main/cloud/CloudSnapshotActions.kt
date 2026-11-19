@@ -25,13 +25,7 @@ import androidx.compose.ui.unit.dp
 import com.xayah.core.data.cloudpool.CloudBackupRepository
 import com.xayah.core.ui.component.Clickable
 import com.xayah.core.ui.component.Title
-import com.xayah.core.datastore.saveBackupSavePath
-import com.xayah.core.ui.route.MainRoutes
-import com.xayah.core.ui.util.LocalNavController
-import com.xayah.core.util.encodeURL
-import com.xayah.core.util.encodedURLWithSpace
 import com.xayah.core.util.localBackupSaveDir
-import com.xayah.core.util.navigateSingle
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -42,9 +36,9 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
-fun CloudSnapshotActions(restoreEnabled: Boolean = true, uploadEnabled: Boolean = true) {
+fun CloudSnapshotActions(uploadEnabled: Boolean = true, onRestore: (suspend (File) -> Unit)? = null) {
+    val restoreEnabled = onRestore != null
     val context = LocalContext.current.applicationContext
-    val navController = checkNotNull(LocalNavController.current)
     val repository = remember(context) { CloudBackupRepository(context) }
     val scope = rememberCoroutineScope()
     val progressUpdates = remember { MutableStateFlow<Pair<Int, Int>?>(null) }
@@ -93,8 +87,7 @@ fun CloudSnapshotActions(restoreEnabled: Boolean = true, uploadEnabled: Boolean 
                 busy = true
                 scope.launch {
                     try {
-                        context.saveBackupSavePath(folder.path)
-                        navController.navigateSingle(MainRoutes.Reload.getRoute(encodedURLWithSpace, folder.path.encodeURL()))
+                        checkNotNull(onRestore)(folder)
                     } catch (error: CancellationException) {
                         throw error
                     } catch (_: Exception) {

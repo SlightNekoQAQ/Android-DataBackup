@@ -83,7 +83,12 @@ abstract class AbstractProcessingServiceProxy {
         }
     }
 
-    suspend fun initialize() = getService().initialize()
+    protected open fun configure(service: AbstractProcessingService) {}
+
+    suspend fun initialize(): Long = getService().let { service ->
+        configure(service)
+        service.initialize()
+    }
 
     suspend fun preprocessing() = getService().preprocessing()
 

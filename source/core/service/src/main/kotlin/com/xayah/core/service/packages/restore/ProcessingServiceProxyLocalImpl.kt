@@ -11,5 +11,11 @@ class ProcessingServiceProxyLocalImpl @Inject constructor() : AbstractProcessing
     @ApplicationContext
     override lateinit var context: Context
 
+    var backupRoot: String? = null
+
+    override fun configure(service: com.xayah.core.service.AbstractProcessingService) {
+        (service as RestoreServiceLocalImpl).backupRoot = backupRoot
+    }
+
     override val intent by lazy { Intent(context, RestoreServiceLocalImpl::class.java) }
 }

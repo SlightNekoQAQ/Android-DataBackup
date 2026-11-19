@@ -56,6 +56,8 @@ sealed class IndexUiIntent : UiIntent {
 class IndexViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val pkgRepo: PackageRepository,
+    private val appsIndex: com.xayah.core.data.repository.AppsRepo,
+    private val filesIndex: com.xayah.core.data.repository.FilesRepo,
     private val mediaRepo: MediaRepository,
     private val cloudRepo: CloudRepository,
 ) : BaseViewModel<IndexUiState, IndexUiIntent, IndexUiEffect>(
@@ -69,6 +71,16 @@ class IndexViewModel @Inject constructor(
         mediumSize = "",
     )
 ) {
+    suspend fun indexCloudSnapshot(folder: java.io.File): List<Target> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val path = folder.canonicalPath
+        appsIndex.loadLocalApps(path) { _, _, _ -> }
+        filesIndex.loadLocalFiles(path) { _, _, _ -> }
+        buildList {
+            if (pkgRepo.queryPackages(OpType.RESTORE, "", path).isNotEmpty()) add(Target.Apps)
+            if (mediaRepo.query(OpType.RESTORE, "", path).isNotEmpty()) add(Target.Files)
+        }.also { check(it.isNotEmpty()) { "Snapshot has no restorable items" } }
+    }
+
     override suspend fun onEvent(state: IndexUiState, intent: IndexUiIntent) {
         when (intent) {
             is IndexUiIntent.UpdateApps -> {

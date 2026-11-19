@@ -36,7 +36,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xayah.core.model.OpType
 import com.xayah.core.model.StorageMode
+import com.xayah.core.model.Target
 import com.xayah.core.ui.component.Clickable
 import com.xayah.core.ui.component.LocalSlotScope
 import com.xayah.core.ui.component.PackageIcons
@@ -50,6 +52,7 @@ import com.xayah.core.ui.route.MainRoutes
 import com.xayah.core.ui.token.SizeTokens
 import com.xayah.core.ui.util.LocalNavController
 import com.xayah.core.ui.util.icon
+import com.xayah.core.util.encodeURL
 import com.xayah.core.util.navigateSingle
 
 @SuppressLint("StringFormatInvalid")
@@ -117,7 +120,17 @@ fun PageRestore() {
             }
 
             if (uiState.storageIndex == 2) {
-                com.xayah.feature.main.cloud.CloudSnapshotActions(uploadEnabled = false)
+                var indexed by remember { mutableStateOf<Pair<String, List<Target>>?>(null) }
+                com.xayah.feature.main.cloud.CloudSnapshotActions(uploadEnabled = false) { folder ->
+                    indexed = folder.canonicalPath to viewModel.indexCloudSnapshot(folder)
+                }
+                indexed?.let { (path, targets) ->
+                    targets.forEach { target ->
+                        Clickable(title = stringResource(if (target == Target.Apps) R.string.apps else R.string.files)) {
+                            navController.navigateSingle(MainRoutes.List.getRoute(target, OpType.RESTORE, backupDir = path.encodeURL()))
+                        }
+                    }
+                }
                 return@Column
             }
 

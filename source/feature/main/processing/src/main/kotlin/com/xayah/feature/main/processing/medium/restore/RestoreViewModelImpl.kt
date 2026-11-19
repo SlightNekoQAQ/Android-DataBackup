@@ -48,10 +48,16 @@ class RestoreViewModelImpl @Inject constructor(
     mTaskRepo: TaskRepository,
     private val mMediaRepo: MediaRepository,
     private val mCloudRepo: CloudRepository,
-    mLocalService: ProcessingServiceProxyLocalImpl,
+    private val restoreLocalService: ProcessingServiceProxyLocalImpl,
     mCloudService: ProcessingServiceProxyCloudImpl,
     private val args: SavedStateHandle,
-) : AbstractMediumProcessingViewModel(mContext, mRootService, mTaskRepo, mLocalService, mCloudService) {
+) : AbstractMediumProcessingViewModel(mContext, mRootService, mTaskRepo, restoreLocalService, mCloudService) {
+    private val localBackupRoot = args.get<String>(MainRoutes.ARG_ACCOUNT_REMOTE)?.decodeURL()?.trim()?.takeIf { it.isNotEmpty() }
+
+    init {
+        restoreLocalService.backupRoot = localBackupRoot
+    }
+
     override suspend fun onOtherEvent(state: IndexUiState, intent: ProcessingUiIntent) {
         when (intent) {
             is UpdateFiles -> {
@@ -59,7 +65,7 @@ class RestoreViewModelImpl @Inject constructor(
                 val backupSaveDir: String
                 if (uiState.value.cloudEntity == null) {
                     cloud = ""
-                    backupSaveDir = mContext.localBackupSaveDir()
+                    backupSaveDir = localBackupRoot ?: mContext.localBackupSaveDir()
                 } else {
                     cloud = uiState.value.cloudEntity!!.name
                     backupSaveDir = uiState.value.cloudEntity!!.remote

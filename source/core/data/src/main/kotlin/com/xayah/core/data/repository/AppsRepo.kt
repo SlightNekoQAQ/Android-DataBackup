@@ -415,7 +415,7 @@ class AppsRepo @Inject constructor(
             }
         } else {
             loadLocalIcons()
-            loadLocalApps(onLoad)
+            loadLocalApps(context.localBackupSaveDir(), onLoad)
         }
     }
 
@@ -468,8 +468,8 @@ class AppsRepo @Inject constructor(
         return null
     }
 
-    private suspend fun loadLocalApps(onLoad: suspend (cur: Int, max: Int, content: String) -> Unit) {
-        val path = pathUtil.getLocalBackupAppsDir()
+    suspend fun loadLocalApps(backupRoot: String, onLoad: suspend (cur: Int, max: Int, content: String) -> Unit) {
+        val path = "$backupRoot/${PathUtil.getAppsRelativeDir()}"
         val paths = rootService.walkFileTree(path)
         paths.forEachIndexed { index, pathParcelable ->
             val fileName = PathUtil.getFileName(pathParcelable.pathString)
@@ -480,7 +480,7 @@ class AppsRepo @Inject constructor(
                         p?.id = 0
                         p?.extraInfo?.activated = false
                         p?.indexInfo?.cloud = ""
-                        p?.indexInfo?.backupDir = context.localBackupSaveDir()
+                        p?.indexInfo?.backupDir = backupRoot
                         parsePreserveAndUserId(pathParcelable).also { result ->
                             result?.also { (pId, uId) ->
                                 p?.indexInfo?.preserveId = pId
@@ -496,7 +496,7 @@ class AppsRepo @Inject constructor(
             }
         }
         rootService.clearEmptyDirectoriesRecursively(path)
-        appsDao.queryPackages(OpType.RESTORE, "", context.localBackupSaveDir()).forEach {
+        appsDao.queryPackages(OpType.RESTORE, "", backupRoot).forEach {
             val src = "${path}/${it.archivesRelativeDir}"
             if (rootService.exists(src).not()) {
                 appsDao.delete(it.id)

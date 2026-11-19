@@ -165,12 +165,12 @@ class FilesRepo @Inject constructor(
                 loadCloudFiles(this, onLoad)
             }
         } else {
-            loadLocalFiles(onLoad)
+            loadLocalFiles(context.localBackupSaveDir(), onLoad)
         }
     }
 
-    private suspend fun loadLocalFiles(onLoad: suspend (cur: Int, max: Int, content: String) -> Unit) {
-        val path = pathUtil.getLocalBackupFilesDir()
+    suspend fun loadLocalFiles(backupRoot: String, onLoad: suspend (cur: Int, max: Int, content: String) -> Unit) {
+        val path = "$backupRoot/${PathUtil.getFilesRelativeDir()}"
         val paths = rootService.walkFileTree(path)
         paths.forEachIndexed { index, pathParcelable ->
             val fileName = PathUtil.getFileName(pathParcelable.pathString)
@@ -182,7 +182,7 @@ class FilesRepo @Inject constructor(
                         m?.extraInfo?.existed = true
                         m?.extraInfo?.activated = false
                         m?.indexInfo?.cloud = ""
-                        m?.indexInfo?.backupDir = context.localBackupSaveDir()
+                        m?.indexInfo?.backupDir = backupRoot
                     }?.apply {
                         if (filesDao.query(indexInfo.opType, preserveId, name, indexInfo.compressionType, indexInfo.cloud, indexInfo.backupDir) == null) {
                             filesDao.upsert(this)
