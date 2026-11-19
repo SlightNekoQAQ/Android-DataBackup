@@ -44,10 +44,11 @@ internal fun providerName(platform: String): String = when (platform) {
 }
 
 @Composable
-internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, configured: Boolean, onDismiss: () -> Unit, onSelect: suspend (String) -> Unit) {
+internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val drive = remember(account, context) { account.personalDrive(context.applicationContext) }
-    var parents by remember(account) { mutableStateOf(listOf(drive.rootId)) }
+    val folder = remember(slot, account) { preferences.defaultFolder(slot) } ?: return
+    var parents by remember(account, folder) { mutableStateOf(listOf(folder)) }
     var files by remember { mutableStateOf<List<ShareFile>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var failed by remember { mutableStateOf(false) }
@@ -74,10 +75,10 @@ internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, config
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(providerName(account.platform)) },
+        title = { Text("${providerName(account.platform)} · /backup") },
         text = {
             Column {
-                if (parents.size == 1 && configured) {
+                if (parents.size == 1) {
                     Text(stringResource(R.string.yunx_connections, connections))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(1, 4, 8, 16, 32).forEach { count ->
@@ -104,7 +105,7 @@ internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, config
                 else -> LazyColumn(Modifier.heightIn(max = 360.dp)) {
                     items(files, key = { it.fid }) { file ->
                         if (file.isdir) {
-                            TextButton(onClick = { parents = parents + file.fid }) { Text(file.fname) }
+                            TextButton(onClick = { parents = parents + drive.directoryId(file) }) { Text(file.fname) }
                         } else {
                             Text(file.fname)
                         }
@@ -113,21 +114,11 @@ internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, config
                 }
             }
         },
-        confirmButton = {
-            TextButton(enabled = !loading && !failed && !saving && parents.size > 1 && parents.last().isNotBlank(), onClick = {
-                saving = true
-                scope.launch {
-                    try { onSelect(parents.last()) }
-                    catch (error: CancellationException) { throw error }
-                    catch (_: Exception) { failed = true }
-                    finally { saving = false }
-                }
-            }) { Text(stringResource(R.string.yunx_choose_folder)) }
-        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.ok)) } },
         dismissButton = {
             if (parents.size > 1) TextButton(enabled = !saving, onClick = { parents = parents.dropLast(1) }) {
                 Text(stringResource(R.string.yunx_parent_folder))
-            } else if (configured) TextButton(enabled = !saving, onClick = {
+            } else TextButton(enabled = !saving, onClick = {
                 saving = true
                 speedFailed = false
                 scope.launch {

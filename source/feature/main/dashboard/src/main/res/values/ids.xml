@@ -1,4 +1,4 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
     <item name="app_name" type="string" />
     <item name="overlook" type="string" />
     <item name="last_backup" type="string" />

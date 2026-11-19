@@ -19,6 +19,7 @@ sealed class MainRoutes(val route: String) {
 
     data object Dashboard : MainRoutes(route = "main_dashboard")
     data object Cloud : MainRoutes(route = "main_cloud")
+    data object CloudPool : MainRoutes(route = "main_cloud_pool")
     data object CloudAddAccount : MainRoutes(route = "main_cloud_add_account")
     data object FTPSetup : MainRoutes(route = "main_ftp_setup/{$ARG_ACCOUNT_NAME}") {
         fun getRoute(name: String) = "main_ftp_setup/$name"

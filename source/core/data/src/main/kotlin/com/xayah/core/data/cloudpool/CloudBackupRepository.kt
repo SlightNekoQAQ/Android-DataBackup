@@ -21,9 +21,45 @@ class CloudBackupRepository(context: Context) {
 
     data class RemoteBackup(val label: String, val provider: String, val accountKey: String, val objectId: String)
 
-    private fun configured(): List<Configured> = vault.load().mapIndexedNotNull { slot, account ->
-        preferences.read(slot)?.let { Configured(slot, account, it) }
-    }.also { require(it.map { item -> item.key }.distinct().size == it.size) { "Duplicate backup destinations" } }
+    private fun checkUnique(destinations: List<Configured>): List<Configured> = destinations.also {
+        require(it.map { item -> item.key }.distinct().size == it.size) { "Duplicate backup destinations" }
+    }
+
+    private fun configured(includeLegacy: Boolean = false): List<Configured> = checkUnique(vault.load().flatMapIndexed { slot, account ->
+        val current = preferences.defaultFolder(slot)
+        listOfNotNull(current, preferences.read(slot).takeIf { includeLegacy }).distinct().map { Configured(slot, account, it) }
+    })
+
+    data class DestinationResult(val slot: Int, val ready: Boolean)
+
+    /** Resolve the provider's folder ID from its root listing, not by assuming IDs are paths. */
+    suspend fun prepareDestinations(): List<DestinationResult> = withContext(Dispatchers.IO) {
+        vault.load().mapIndexed { slot, account ->
+            val ready = try {
+                val drive = account.personalDrive(context)
+                suspend fun findFolder(): ShareFile? {
+                    val matches = drive.list(drive.rootId).filter { it.fname == DEFAULT_FOLDER }
+                    if (matches.size > 1 || matches.any { !it.isdir }) throw IOException("Conflicting /backup entry")
+                    return matches.singleOrNull()
+                }
+                val folder = findFolder()?.let(drive::directoryId) ?: try {
+                    drive.createDirectory(drive.rootId, DEFAULT_FOLDER)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    findFolder()?.let(drive::directoryId) ?: throw error
+                }
+                require(folder.isNotBlank() && folder != drive.rootId)
+                preferences.saveDefaultFolder(slot, folder)
+                true
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                false
+            }
+            DestinationResult(slot, ready)
+        }
+    }
 
     private fun Configured.asDrive() = YunxCloudDrive(context, account, key, folder, preferences.connections(slot))
 
@@ -31,11 +67,12 @@ class CloudBackupRepository(context: Context) {
 
     fun lastConfirmedUpload(): String? = receipts.getString("snapshot-and-providers", null)
 
-    fun hasDestinations(): Boolean = configured().isNotEmpty()
+    fun hasDestinations(): Boolean = vault.load().isNotEmpty()
 
     suspend fun publish(localRoot: File, password: CharArray, folders: Set<String>? = null, onProgress: (Int, Int) -> Unit = { _, _ -> }): CloudSnapshot.Published = withContext(Dispatchers.IO) {
-        val accounts = configured()
-        require(accounts.isNotEmpty()) { "Select a backup folder on at least one cloud account" }
+        val ready = prepareDestinations().filter { it.ready }.map { it.slot }.toSet()
+        val accounts = configured().filter { it.slot in ready }
+        require(accounts.isNotEmpty()) { "Could not locate or create /backup on any account" }
         val root = localRoot.canonicalFile
         val sources = (folders ?: setOf("apps", "files", "configs")).flatMap { category ->
             validateRelativePath(category)
@@ -70,7 +107,8 @@ class CloudBackupRepository(context: Context) {
     }
 
     suspend fun available(): List<RemoteBackup> = withContext(Dispatchers.IO) {
-        val accounts = configured()
+        if (configured().isEmpty()) prepareDestinations()
+        val accounts = configured(includeLegacy = true)
         val backups = mutableListOf<RemoteBackup>()
         var successfulListings = 0
         for (account in accounts) {
@@ -89,18 +127,47 @@ class CloudBackupRepository(context: Context) {
         backups
     }
 
+    data class FileLocation(val original: String, val provider: String, val account: String, val remoteName: String?, val folder: String)
+
+    suspend fun locations(backup: RemoteBackup, password: CharArray): List<FileLocation> = withContext(Dispatchers.IO) {
+        val (accounts, manifest) = readManifest(backup)
+        val archives = CloudManifest.decode(manifest, password)
+        val locations = mutableMapOf<String, Map<String, String>>()
+        for (account in accounts.filter { target -> archives.any { it.accountId == target.key } }) {
+            try {
+                locations[account.key] = account.account.personalDrive(context).list(account.folder)
+                    .filterNot { it.isdir }.associate { it.fid to it.fname }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Keep showing other disks when one account cannot be listed.
+            }
+        }
+        archives.map { archive ->
+            val account = accounts.firstOrNull { it.key == archive.accountId }
+            FileLocation(archive.relativePath, archive.accountId.substringBefore(':'), account?.account?.nickname.orEmpty(),
+                locations[archive.accountId]?.get(archive.fileId),
+                if (account != null && preferences.defaultFolder(account.slot) == account.folder) "/backup" else "")
+        }
+    }
+
     suspend fun restore(backup: RemoteBackup, password: CharArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): File = withContext(Dispatchers.IO) {
-        val accounts = configured()
+        val (accounts, manifest) = readManifest(backup)
+        CloudSnapshot(accounts.map { it.asDrive() }, staging).retrieve(manifest, password, onProgress)
+    }
+
+    private suspend fun readManifest(backup: RemoteBackup): Pair<List<Configured>, ByteArray> {
+        val accounts = configured(includeLegacy = true)
         val source = accounts.singleOrNull { it.key == backup.accountKey } ?: throw IOException("Backup account is not configured")
         val remote = source.account.personalDrive(context).list(source.folder).singleOrNull { it.fid == backup.objectId && it.isManifest() }
             ?: throw IOException("Backup manifest is missing")
         if (remote.fsize !in 1..MAX_MANIFEST) throw IOException("Invalid backup manifest size")
         check(staging.isDirectory || staging.mkdirs())
         val temp = File.createTempFile("index-", ".partial", staging)
-        try {
+        return try {
             source.asDrive().download(remote.fid, temp)
             if (temp.length() != remote.fsize) throw IOException("Incomplete backup manifest")
-            CloudSnapshot(accounts.map { it.asDrive() }, staging).retrieve(temp.readBytes(), password, onProgress)
+            accounts to temp.readBytes()
         } finally {
             temp.delete()
         }
@@ -129,6 +196,7 @@ class CloudBackupRepository(context: Context) {
     private fun ShareFile.isManifest() = !isdir && fname.startsWith("db-") && fname.endsWith(CloudManifest.FILE_NAME)
 
     private companion object {
+        const val DEFAULT_FOLDER = "backup"
         const val MAX_MANIFEST = 8L * 1024 * 1024
     }
 }

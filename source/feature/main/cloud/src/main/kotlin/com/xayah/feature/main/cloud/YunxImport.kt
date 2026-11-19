@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import com.xayah.core.data.cloudpool.CloudAccountVault
+import com.xayah.core.data.cloudpool.CloudBackupRepository
 import com.xayah.core.data.cloudpool.CloudDestinationPreferences
 import com.xayah.core.data.cloudpool.ImportedCloudAccount
 import com.xayah.core.data.cloudpool.YunxCredentialImport
@@ -62,9 +63,12 @@ internal fun YunxImport() {
         }
     }
     var inspected by remember { mutableStateOf<Int?>(null) }
+    val repository = remember(context) { CloudBackupRepository(context) }
     var configured by remember { mutableStateOf(emptySet<Int>()) }
-    LaunchedEffect(accounts) {
-        configured = withContext(Dispatchers.IO) { accounts.indices.filter { destinations.read(it) != null }.toSet() }
+    var refresh by remember { mutableStateOf(0) }
+    LaunchedEffect(accounts, refresh) {
+        configured = if (accounts.isEmpty()) emptySet() else repository.prepareDestinations()
+            .filter { it.ready }.map { it.slot }.toSet()
     }
     Title(title = stringResource(R.string.yunx_account_group)) {
         accounts.forEachIndexed { slot, account ->
@@ -72,8 +76,8 @@ internal fun YunxImport() {
                 enabled = !busy,
                 icon = Icons.Outlined.Cloud,
                 title = providerName(account.platform),
-                value = listOf(account.nickname, stringResource(if (slot in configured) R.string.yunx_folder_selected else R.string.yunx_choose_folder)).filter(String::isNotBlank).joinToString(" · "),
-            ) { inspected = slot }
+                value = listOf(account.nickname, stringResource(if (slot in configured) R.string.yunx_backup_ready else R.string.yunx_backup_retry)).filter(String::isNotBlank).joinToString(" · "),
+            ) { if (slot in configured) inspected = slot else refresh++ }
         }
         Clickable(
             enabled = !busy,
@@ -84,11 +88,7 @@ internal fun YunxImport() {
     }
     inspected?.let { slot ->
         accounts.getOrNull(slot)?.let { account ->
-            YunxAccountBrowser(account, slot, slot in configured, onDismiss = { inspected = null }, onSelect = { folder ->
-                withContext(Dispatchers.IO) { destinations.select(slot, folder) }
-                configured = configured + slot
-                inspected = null
-            })
+            YunxAccountBrowser(account, slot, onDismiss = { inspected = null })
         }
     }
     val selected = uri ?: return

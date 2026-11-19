@@ -42,6 +42,15 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
         else -> "0"
     }
 
+    fun directoryId(file: ShareFile): String {
+        require(file.isdir)
+        return when (platform) {
+            "baidu" -> file.fidToken
+            "ilanzou" -> file.fid.removePrefix(ILanzouConstants.FOLDER_PREFIX)
+            else -> file.fid
+        }.also { require(it.isNotBlank()) }
+    }
+
     suspend fun list(parent: String): List<ShareFile> = withContext(Dispatchers.IO) {
         when (platform) {
             "quark" -> quark.listCloudFiles(parent, cookie).orEmpty()

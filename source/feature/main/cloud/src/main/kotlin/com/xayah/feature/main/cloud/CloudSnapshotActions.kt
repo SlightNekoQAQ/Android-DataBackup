@@ -55,6 +55,7 @@ internal fun CloudSnapshotActions() {
     var message by remember { mutableStateOf("") }
     var candidates by remember { mutableStateOf<List<CloudBackupRepository.RemoteBackup>?>(null) }
     var selected by remember { mutableStateOf<CloudBackupRepository.RemoteBackup?>(null) }
+    var locations by remember { mutableStateOf<List<CloudBackupRepository.FileLocation>?>(null) }
     var verifiedFolder by remember { mutableStateOf<File?>(null) }
     var receipt by remember(repository) { mutableStateOf(repository.lastConfirmedUpload()) }
     val failed = stringResource(R.string.yunx_job_failed)
@@ -116,15 +117,35 @@ internal fun CloudSnapshotActions() {
                     TextButton(onClick = { selected = backup; verifiedFolder = null; candidates = null; mode = 1 }) {
                         Text("${providerName(backup.provider)} · ${backup.label}")
                     }
+                    TextButton(onClick = { selected = backup; candidates = null; mode = 2 }) {
+                        Text(stringResource(R.string.yunx_locations))
+                    }
                 }
             } },
             confirmButton = { TextButton(onClick = { candidates = null }) { Text(stringResource(android.R.string.cancel)) } },
         )
     }
+    locations?.let { entries ->
+        AlertDialog(onDismissRequest = { locations = null }, title = { Text(stringResource(R.string.yunx_locations)) },
+            text = { LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(entries, key = { it.original }) { entry ->
+                    Column {
+                        Text(entry.original)
+                        Text(listOf(providerName(entry.provider), entry.account).filter(String::isNotBlank).joinToString(" · "))
+                        Text(entry.remoteName?.let { "${entry.folder.ifBlank { "…" }}/$it" }
+                            ?: stringResource(R.string.yunx_location_unverified))
+                    }
+                }
+            } }, confirmButton = { TextButton(onClick = { locations = null }) { Text(stringResource(android.R.string.ok)) } })
+    }
     val action = mode ?: return
     AlertDialog(
         onDismissRequest = { mode = null; password = "" },
-        title = { Text(stringResource(if (action == 0) R.string.yunx_upload_local else R.string.yunx_download_snapshot)) },
+        title = { Text(stringResource(when (action) {
+            0 -> R.string.yunx_upload_local
+            1 -> R.string.yunx_download_snapshot
+            else -> R.string.yunx_locations
+        })) },
         text = { Column {
             OutlinedTextField(password, { password = it }, singleLine = true,
                 label = { Text(stringResource(R.string.yunx_backup_passphrase)) },
@@ -146,9 +167,12 @@ internal fun CloudSnapshotActions() {
                             val result = repository.publish(localRoot, passphrase) { done, total -> progressUpdates.value = done to total }
                             receipt = repository.lastConfirmedUpload()
                             if (result.missingCopies.isEmpty()) complete else incomplete
-                        } else {
+                        } else if (action == 1) {
                             verifiedFolder = repository.restore(checkNotNull(backup), passphrase) { done, total -> progressUpdates.value = done to total }
                             restored
+                        } else {
+                            locations = repository.locations(checkNotNull(backup), passphrase)
+                            ""
                         }
                     } catch (error: CancellationException) {
                         throw error

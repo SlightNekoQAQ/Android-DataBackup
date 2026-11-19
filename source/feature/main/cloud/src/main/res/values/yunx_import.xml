@@ -30,4 +30,9 @@
     <string name="yunx_job_progress">Processed %1$d of %2$d files</string>
     <string name="yunx_connections">Gopeed connections: %1$d</string>
     <string name="yunx_upload_receipt">Last snapshot confirmed on cloud</string>
+    <string name="yunx_pool_page">Cloud drive pool</string>
+    <string name="yunx_backup_ready">/backup</string>
+    <string name="yunx_backup_retry">/backup not ready · tap to retry</string>
+    <string name="yunx_locations">File locations</string>
+    <string name="yunx_location_unverified">File not verified in the remote listing</string>
 </resources>

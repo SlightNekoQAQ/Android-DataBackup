@@ -135,7 +135,7 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
                     com.xayah.feature.main.processing.CloudPoolBackupOption(
                         kind = com.xayah.core.data.cloudpool.CloudBackupRequest.Kind.APPS,
                         onStart = { viewModel.emitIntentOnIO(FinishSetup(navController = localNavController)) },
-                        onConfigure = { navController.navigateSingle(MainRoutes.Cloud.route) },
+                        onConfigure = { navController.navigateSingle(MainRoutes.CloudPool.route) },
                     )
                 }
                 AnimatedVisibility(uiState.storageIndex == 1) {

@@ -198,6 +198,18 @@ fun PageDashboard() {
                     }
                     QuickActionsButton(
                         modifier = Modifier.weight(1f),
+                        enabled = true,
+                        title = stringResource(id = R.string.cloud_pool_home),
+                        icon = Icons.Outlined.Cloud,
+                        colorContainer = ThemedColorSchemeKeyTokens.PurplePrimaryContainer,
+                        colorL80D20 = ThemedColorSchemeKeyTokens.PurpleL80D20,
+                        onColorContainer = ThemedColorSchemeKeyTokens.PurpleOnPrimaryContainer,
+                        actionIcon = Icons.Rounded.KeyboardArrowRight
+                    ) {
+                        navController.navigateSingle(MainRoutes.CloudPool.route)
+                    }
+                    QuickActionsButton(
+                        modifier = Modifier.weight(1f),
                         enabled = nullBackupDir.not(),
                         title = stringResource(id = R.string.restore),
                         icon = ImageVector.vectorResource(id = R.drawable.ic_rounded_history),

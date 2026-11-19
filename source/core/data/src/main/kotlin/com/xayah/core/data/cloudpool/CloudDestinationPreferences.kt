@@ -8,6 +8,13 @@ class CloudDestinationPreferences(context: Context) {
 
     fun read(slot: Int): String? = preferences.getString("folder-$slot", null)
 
+    fun defaultFolder(slot: Int): String? = preferences.getString("default-folder-$slot", null)
+
+    fun saveDefaultFolder(slot: Int, folderId: String) {
+        require(slot >= 0 && folderId.isNotBlank())
+        check(preferences.edit().putString("default-folder-$slot", folderId).commit())
+    }
+
     fun connections(slot: Int): Int = preferences.getInt("connections-$slot", 8).coerceIn(1, 32)
 
     fun setConnections(slot: Int, count: Int) {

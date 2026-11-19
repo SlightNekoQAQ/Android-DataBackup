@@ -30,4 +30,9 @@
     <string name="yunx_job_progress">已处理 %1$d / %2$d 个文件</string>
     <string name="yunx_connections">Gopeed 下载连接数：%1$d</string>
     <string name="yunx_upload_receipt">最近一次已确认上传的网盘快照</string>
+    <string name="yunx_pool_page">网盘容量池</string>
+    <string name="yunx_backup_ready">/backup</string>
+    <string name="yunx_backup_retry">/backup 未就绪 · 点击重试</string>
+    <string name="yunx_locations">查看文件位置</string>
+    <string name="yunx_location_unverified">未能在远端目录核实此文件</string>
 </resources>

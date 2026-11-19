@@ -17,6 +17,7 @@ import com.xayah.core.ui.theme.DataBackupTheme
 import com.xayah.core.ui.util.LocalNavController
 import com.xayah.core.util.command.BaseUtil
 import com.xayah.feature.main.cloud.PageCloud
+import com.xayah.feature.main.cloud.PageCloudPool
 import com.xayah.feature.main.cloud.add.PageCloudAddAccount
 import com.xayah.feature.main.cloud.add.PageFTPSetup
 import com.xayah.feature.main.cloud.add.PageSFTPSetup
@@ -79,6 +80,9 @@ class MainActivity : AppCompatActivity() {
                         }
                         composable(MainRoutes.Cloud.route) {
                             PageCloud()
+                        }
+                        composable(MainRoutes.CloudPool.route) {
+                            PageCloudPool()
                         }
                         composable(MainRoutes.CloudAddAccount.route) {
                             PageCloudAddAccount()
