@@ -73,21 +73,21 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
             val temporary = File.createTempFile("manifest-", ".partial", privateStaging)
             try {
                 temporary.writeBytes(CloudManifest.encode(entries, passphrase))
-            val copies = linkedMapOf<String, String>()
-            val missing = linkedSetOf<String>()
-            val used = entries.map(CloudArchive::accountId).toSet()
-            for (drive in drives.filter { it.accountId in used }) {
-                try {
-                    val reference = drive.upload(temporary, "db-$id-${CloudManifest.FILE_NAME}")
-                    if (reference.isBlank()) throw IOException("Provider did not confirm manifest upload")
-                    copies[drive.accountId] = reference
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (_: Exception) {
-                    missing += drive.accountId
+                val copies = linkedMapOf<String, String>()
+                val missing = linkedSetOf<String>()
+                val used = entries.map(CloudArchive::accountId).toSet()
+                for (drive in drives.filter { it.accountId in used }) {
+                    try {
+                        val reference = drive.upload(temporary, "db-$id-${CloudManifest.FILE_NAME}")
+                        if (reference.isBlank()) throw IOException("Provider did not confirm manifest upload")
+                        copies[drive.accountId] = reference
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        missing += drive.accountId
+                    }
                 }
-            }
-            if (copies.isEmpty()) throw IOException("Cloud backup has no recoverable manifest")
+                if (copies.isEmpty()) throw IOException("Cloud backup has no recoverable manifest")
                 Published(id, copies, missing)
             } finally {
                 temporary.delete()
