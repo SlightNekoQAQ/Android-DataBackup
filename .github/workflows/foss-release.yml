@@ -1,0 +1,77 @@
+name: Prepare DataBackup FOSS release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version matching source/gradle/libs.versions.toml (without v)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/cloud-backup'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: release-signing
+    defaults:
+      run:
+        working-directory: source
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+          submodules: recursive
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Validate version
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          python3 - <<'PY'
+          import os, re, tomllib
+          version = os.environ['REQUESTED_VERSION']
+          with open('gradle/libs.versions.toml', 'rb') as f:
+              actual = tomllib.load(f)['versions']['versionName']
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', version) or version != actual:
+              raise SystemExit(f'Requested version must match Gradle version {actual!r}')
+          PY
+      - name: Build and verify signed APKs
+        env:
+          STORE_FILE: ci-release.keystore
+          STORE_BASE64: ${{ secrets.STORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${STORE_BASE64:?missing STORE_BASE64}" "${STORE_PASSWORD:?missing STORE_PASSWORD}" "${KEY_ALIAS:?missing KEY_ALIAS}" "${KEY_PASSWORD:?missing KEY_PASSWORD}"
+          umask 077
+          trap 'rm -f -- "app/$STORE_FILE"' EXIT
+          printf '%s' "$STORE_BASE64" | base64 --decode > "app/$STORE_FILE"
+          bash ./gradlew --no-daemon \
+            assembleArm64-v8aFossRelease assembleArmeabi-v7aFossRelease \
+            assembleX86FossRelease assembleX86_64FossRelease
+          apksigner=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
+          test -x "$apksigner"
+          mkdir -p release-artifacts
+          for abi in arm64-v8a armeabi-v7a x86 x86_64; do
+            mapfile -t apks < <(find app/build/outputs/apk -type f -name "*-$abi-foss-release.apk")
+            test "${#apks[@]}" -eq 1
+            "$apksigner" verify "${apks[0]}"
+            cp -- "${apks[0]}" release-artifacts/
+          done
+          (cd release-artifacts && sha256sum -- *.apk > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DataBackup-FOSS-release-${{ inputs.version }}-${{ github.sha }}
+          path: source/release-artifacts/
+          if-no-files-found: error
