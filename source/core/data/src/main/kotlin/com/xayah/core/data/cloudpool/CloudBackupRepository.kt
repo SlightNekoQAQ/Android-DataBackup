@@ -16,7 +16,7 @@ class CloudBackupRepository(context: Context) {
     private val preferences = CloudDestinationPreferences(this.context)
 
     private inner class Configured(val slot: Int, val account: ImportedCloudAccount, val folder: String, val identity: String) {
-        // Stable manifest identity and provider-local folder route are distinct identifiers.
+        // Keep stable identity for manifest matching and folder ID for provider API routing.
         val key: String get() = identity
         val driveId: String get() = "${account.platform}:$folder"
         fun asDrive() = YunxCloudDrive(context, account, driveId, folder, preferences.connections(slot))
@@ -33,7 +33,7 @@ class CloudBackupRepository(context: Context) {
             if (!YunxCredentialImport.supports(account.platform)) return@mapIndexedNotNull null
             val folder = preferences.defaultFolder(slot) ?: preferences.read(slot).takeIf { includeLegacy } ?: return@mapIndexedNotNull null
             val identity = if (!verifyIdentity) "${account.platform}:${account.identity.ifBlank { slot.toString() }}" else try {
-                "${account.platform}:${account.verifiedIdentity(context)}"
+                account.verifiedIdentity(context)
             } catch (error: CancellationException) {
                 throw error
             } catch (_: Exception) {
@@ -211,17 +211,21 @@ class CloudBackupRepository(context: Context) {
         val byIdentity = accounts.associateBy { it.identity }
         val missing = archives.filter { it.accountIdentity !in byIdentity }
         val accessibleArchives = archives.filter { it.accountIdentity in byIdentity }
-        val accessibleDrives = accessibleArchives.mapNotNull { archive ->
-            val account = byIdentity.getValue(archive.accountIdentity)
-            account.asDrive()
+        val accessibleDrives = accessibleArchives.map { archive ->
+            byIdentity.getValue(archive.accountIdentity).asDrive()
         }.distinctBy { it.accountId }
+        // The manifest identifies accounts by stable provider identity. Translate to this
+        // device's current provider folder handles for actual object downloads.
+        val routedArchives = accessibleArchives.map { archive ->
+            archive.copy(accountId = byIdentity.getValue(archive.accountIdentity).driveId)
+        }
         if (accessibleArchives.isEmpty()) {
             check(staging.isDirectory || staging.mkdirs())
             val emptyFolder = File(staging, "snapshot-empty-${java.util.UUID.randomUUID()}")
             check(emptyFolder.mkdirs())
             return@withContext RestoreResult(emptyFolder, missing)
         }
-        val accessibleIndex = CloudManifest.encode(accessibleArchives)
+        val accessibleIndex = CloudManifest.encode(routedArchives)
         val retrieval = CloudSnapshot(accessibleDrives, staging).retrieveAvailable(accessibleIndex, onProgress)
         RestoreResult(retrieval.folder, missing + retrieval.unavailable)
     }
