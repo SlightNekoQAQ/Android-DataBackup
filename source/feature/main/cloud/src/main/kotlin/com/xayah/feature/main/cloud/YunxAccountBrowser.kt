@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.xayah.core.data.cloudpool.ImportedCloudAccount
+import com.xayah.core.data.cloudpool.CloudBackupRepository
 import com.yunx.app.data.network.model.ShareFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +40,7 @@ internal fun providerName(platform: String): String = when (platform) {
 }
 
 @Composable
-internal fun YunxAccountBrowser(account: ImportedCloudAccount, onDismiss: () -> Unit, onSelect: suspend (String) -> Unit) {
+internal fun YunxAccountBrowser(account: ImportedCloudAccount, slot: Int, configured: Boolean, onDismiss: () -> Unit, onSelect: suspend (String) -> Unit) {
     val context = LocalContext.current
     val drive = remember(account, context) { account.personalDrive(context.applicationContext) }
     var parents by remember(account) { mutableStateOf(listOf(drive.rootId)) }
@@ -48,6 +49,9 @@ internal fun YunxAccountBrowser(account: ImportedCloudAccount, onDismiss: () -> 
     var failed by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val repository = remember(context) { CloudBackupRepository(context) }
+    var speed by remember { mutableStateOf<Long?>(null) }
+    var speedFailed by remember { mutableStateOf(false) }
     LaunchedEffect(drive, parents) {
         loading = true
         failed = false
@@ -93,8 +97,23 @@ internal fun YunxAccountBrowser(account: ImportedCloudAccount, onDismiss: () -> 
             }) { Text(stringResource(R.string.yunx_choose_folder)) }
         },
         dismissButton = {
-            if (parents.size > 1) TextButton(onClick = { parents = parents.dropLast(1) }) {
+            if (parents.size > 1) TextButton(enabled = !saving, onClick = { parents = parents.dropLast(1) }) {
                 Text(stringResource(R.string.yunx_parent_folder))
+            } else if (configured) TextButton(enabled = !saving, onClick = {
+                saving = true
+                speedFailed = false
+                scope.launch {
+                    try { speed = repository.measureSpeed(slot) }
+                    catch (error: CancellationException) { throw error }
+                    catch (_: Exception) { speedFailed = true }
+                    finally { saving = false }
+                }
+            }) {
+                Text(when {
+                    speedFailed -> stringResource(R.string.yunx_speed_failed)
+                    speed != null -> stringResource(R.string.yunx_speed_result, (speed ?: 0L) / 1024L)
+                    else -> stringResource(R.string.yunx_speed_test)
+                })
             }
         },
     )

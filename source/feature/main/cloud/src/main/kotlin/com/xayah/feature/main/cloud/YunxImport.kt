@@ -84,7 +84,7 @@ internal fun YunxImport() {
     }
     inspected?.let { slot ->
         accounts.getOrNull(slot)?.let { account ->
-            YunxAccountBrowser(account, onDismiss = { inspected = null }, onSelect = { folder ->
+            YunxAccountBrowser(account, slot, slot in configured, onDismiss = { inspected = null }, onSelect = { folder ->
                 withContext(Dispatchers.IO) { destinations.select(slot, folder) }
                 configured = configured + slot
                 inspected = null

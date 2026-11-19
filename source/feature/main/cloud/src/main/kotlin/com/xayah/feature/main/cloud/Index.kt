@@ -63,6 +63,7 @@ fun PageCloud() {
             verticalArrangement = Arrangement.spacedBy(SizeTokens.Level24)
         ) {
             YunxImport()
+            CloudSnapshotActions()
             Title(title = stringResource(id = R.string.account)) {
                 accounts.forEach {
                     Clickable(

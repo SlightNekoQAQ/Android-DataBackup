@@ -1,0 +1,143 @@
+package com.xayah.feature.main.cloud
+
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Cloud
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import com.xayah.core.data.cloudpool.CloudBackupRepository
+import com.xayah.core.ui.component.Clickable
+import com.xayah.core.ui.component.Title
+import com.xayah.core.util.localBackupSaveDir
+import java.io.File
+import java.io.IOException
+import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+internal fun CloudSnapshotActions() {
+    val context = LocalContext.current.applicationContext
+    val repository = remember(context) { CloudBackupRepository(context) }
+    val scope = rememberCoroutineScope()
+    var mode by remember { mutableStateOf<Int?>(null) }
+    var password by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("") }
+    var candidates by remember { mutableStateOf<List<CloudBackupRepository.RemoteBackup>?>(null) }
+    var selected by remember { mutableStateOf<CloudBackupRepository.RemoteBackup?>(null) }
+    val failed = stringResource(R.string.yunx_job_failed)
+    val empty = stringResource(R.string.yunx_no_backups)
+    val complete = stringResource(R.string.yunx_upload_complete)
+    val incomplete = stringResource(R.string.yunx_manifest_partial)
+    val restored = stringResource(R.string.yunx_restore_path)
+    Title(title = stringResource(R.string.yunx_snapshot_section)) {
+        Clickable(enabled = !busy, icon = Icons.Outlined.Cloud, title = stringResource(R.string.yunx_upload_local),
+            desc = stringResource(R.string.yunx_upload_local_desc)) {
+            message = ""
+            mode = 0
+        }
+        Clickable(enabled = !busy, icon = Icons.Outlined.Cloud, title = stringResource(R.string.yunx_download_snapshot)) {
+            busy = true
+            message = ""
+            scope.launch {
+                try {
+                    val found = repository.available()
+                    if (found.isEmpty()) message = empty else candidates = found
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    message = failed
+                } finally { busy = false }
+            }
+        }
+        if (busy || message.isNotBlank()) Clickable(
+            readOnly = true,
+            title = if (busy) stringResource(R.string.yunx_job_running) else message,
+        )
+    }
+    candidates?.let { options ->
+        AlertDialog(onDismissRequest = { candidates = null },
+            title = { Text(stringResource(R.string.yunx_download_snapshot)) },
+            text = { LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                items(options) { backup ->
+                    TextButton(onClick = { selected = backup; candidates = null; mode = 1 }) {
+                        Text("${providerName(backup.provider)} · ${backup.label}")
+                    }
+                }
+            } },
+            confirmButton = { TextButton(onClick = { candidates = null }) { Text(stringResource(android.R.string.cancel)) } },
+        )
+    }
+    val action = mode ?: return
+    AlertDialog(
+        onDismissRequest = { mode = null; password = "" },
+        title = { Text(stringResource(if (action == 0) R.string.yunx_upload_local else R.string.yunx_download_snapshot)) },
+        text = { Column {
+            OutlinedTextField(password, { password = it }, singleLine = true,
+                label = { Text(stringResource(R.string.yunx_backup_passphrase)) },
+                visualTransformation = PasswordVisualTransformation())
+        } },
+        dismissButton = { TextButton(onClick = { mode = null; password = "" }) { Text(stringResource(android.R.string.cancel)) } },
+        confirmButton = {
+            TextButton(enabled = !busy && password.length >= 8, onClick = {
+                val passphrase = password.toCharArray()
+                val backup = selected
+                password = ""
+                mode = null
+                busy = true
+                scope.launch {
+                    try {
+                        val localRoot = withContext(Dispatchers.IO) { File(context.localBackupSaveDir()) }
+                        message = if (action == 0) {
+                            val result = repository.publish(localRoot, passphrase)
+                            if (result.missingCopies.isEmpty()) complete else incomplete
+                        } else {
+                            val staging = repository.restore(checkNotNull(backup), passphrase)
+                            val dest = withContext(Dispatchers.IO) {
+                                // Keep the existing local repository intact. Import via DataBackup's folder picker.
+                                val output = File(localRoot, "cloud-restore-${UUID.randomUUID()}")
+                                check(output.mkdir())
+                                try {
+                                    if (!staging.copyRecursively(output, overwrite = false)) throw IOException("Could not export verified backup")
+                                    output
+                                } catch (error: Exception) {
+                                    output.deleteRecursively()
+                                    throw error
+                                } finally { staging.deleteRecursively() }
+                            }
+                            "$restored\n${dest.path}"
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        message = failed
+                    } finally {
+                        passphrase.fill('\u0000')
+                        busy = false
+                    }
+                }
+            }) { Text(stringResource(android.R.string.ok)) }
+        },
+    )
+}

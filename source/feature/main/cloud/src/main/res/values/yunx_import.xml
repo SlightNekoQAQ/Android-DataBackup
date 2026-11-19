@@ -11,4 +11,18 @@
     <string name="yunx_parent_folder">Parent folder</string>
     <string name="yunx_choose_folder">Select backup folder</string>
     <string name="yunx_folder_selected">Backup folder selected</string>
+    <string name="yunx_snapshot_section">Cloud backup and recovery</string>
+    <string name="yunx_upload_local">Upload completed local backup</string>
+    <string name="yunx_upload_local_desc">Encrypt existing apps, files and configuration archives and upload to your selected folders.</string>
+    <string name="yunx_download_snapshot">Download a cloud backup</string>
+    <string name="yunx_backup_passphrase">Backup passphrase (at least 8 characters)</string>
+    <string name="yunx_job_failed">Cloud task failed. Check the account, selected folder, available space and passphrase.</string>
+    <string name="yunx_no_backups">No backup manifests found in the selected folders.</string>
+    <string name="yunx_upload_complete">Backup uploaded.</string>
+    <string name="yunx_manifest_partial">Backup uploaded, but some recovery index copies could not be saved.</string>
+    <string name="yunx_restore_path">Files verified. Select this folder as the local backup directory and reload backups before restoring:</string>
+    <string name="yunx_job_running">Working… Keep this screen open.</string>
+    <string name="yunx_speed_test">Test download speed</string>
+    <string name="yunx_speed_failed">Test failed: use a 1–16 MiB file</string>
+    <string name="yunx_speed_result">%1$d KiB/s</string>
 </resources>

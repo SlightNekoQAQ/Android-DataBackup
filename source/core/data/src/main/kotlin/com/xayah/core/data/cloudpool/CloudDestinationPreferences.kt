@@ -8,6 +8,15 @@ class CloudDestinationPreferences(context: Context) {
 
     fun read(slot: Int): String? = preferences.getString("folder-$slot", null)
 
+    fun connections(slot: Int): Int = preferences.getInt("connections-$slot", 8).coerceIn(1, 32)
+
+    fun speed(slot: Int): Long? = preferences.getLong("speed-$slot", -1L).takeIf { it >= 0 }
+
+    fun recordSpeed(slot: Int, bytesPerSecond: Long) {
+        require(slot >= 0 && bytesPerSecond > 0)
+        check(preferences.edit().putLong("speed-$slot", bytesPerSecond).commit())
+    }
+
     fun select(slot: Int, folderId: String) {
         require(slot >= 0 && folderId.isNotBlank())
         check(preferences.edit().putString("folder-$slot", folderId).commit()) { "Cannot save cloud destination" }
