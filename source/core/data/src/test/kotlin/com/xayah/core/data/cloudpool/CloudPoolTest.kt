@@ -103,6 +103,8 @@ class CloudPoolTest {
         assertFalse(b.exists())
         assertEquals(1, first.objects.size)
         assertEquals(1, second.objects.size)
+        assertEquals(2, first.objects.size)
+        assertEquals(2, second.objects.size)
         val manifest = writer.finish()
         assertEquals(setOf("fast", "slow"), manifest.manifestCopies.keys)
         assertTrue(manifest.missingCopies.isEmpty())
