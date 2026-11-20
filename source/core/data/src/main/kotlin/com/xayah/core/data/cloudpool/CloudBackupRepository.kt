@@ -264,11 +264,29 @@ class CloudBackupRepository(context: Context) {
     data class PreparedRestore(val folder: File, val unavailable: List<String>, val unverifiablePlatforms: Set<String>)
 
     /** Stage only the small restore configs. The normal restore job pulls each payload when needed. */
-    suspend fun prepareRestore(backup: RemoteBackup, selected: Set<String>): PreparedRestore = withContext(Dispatchers.IO) {
-        val contents = backupContents(backup)
-        val items = contents.entries.filter { it.path in selected }
-        require(items.isNotEmpty() && items.size == selected.size)
-        val relevant = contents.archives.filter { archive -> items.any { it.includesArchive(archive.relativePath) } }
+    suspend fun prepareRestore(kind: String): PreparedRestore = withContext(Dispatchers.IO) {
+        require(kind == "app" || kind == "file")
+        val entriesByPath = linkedMapOf<String, Pair<CloudManifest.BackupEntry, List<CloudArchive>>>()
+        val unreadable = mutableListOf<String>()
+        // A cloud backup date is not a user-selectable source. Use the newest record
+        // per restore path, without losing items only present in older backups.
+        for (backup in discoverBackups()) {
+            val contents = try {
+                backupContents(backup)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                unreadable += backup.label
+                continue
+            }
+            contents.entries.filter { it.kind == kind }.forEach { item ->
+                if (item.path !in entriesByPath) {
+                    entriesByPath[item.path] = item to contents.archives.filter { item.includesArchive(it.relativePath) }
+                }
+            }
+        }
+        val items = entriesByPath.values.map { it.first }
+        val relevant = entriesByPath.values.flatMap { it.second }.distinctBy { it.relativePath }
         val providers = relevant.map { it.accountIdentity.substringBefore(':') }.toSet()
         val accounts = configured(includeLegacy = true, providers = providers)
         val byIdentity = accounts.filterNot { ":unverified:" in it.identity }.associateBy { it.identity }
@@ -277,7 +295,7 @@ class CloudBackupRepository(context: Context) {
         check(root.mkdirs())
         try {
             val archives = relevant.associateBy { it.relativePath }
-            val unavailable = mutableListOf<String>()
+            val unavailable = unreadable.toMutableList()
             val prepared = items.filter { item ->
                 val config = archives.getValue(item.archive)
                 val owner = byIdentity[config.accountIdentity]

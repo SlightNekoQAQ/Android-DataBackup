@@ -92,6 +92,7 @@ fun PageRestore() {
         val target = cloudTarget
         if (target != null) {
             CloudRestoreContent(target, viewModel) { folder ->
+                cloudTarget = null
                 navController.navigateSingle(MainRoutes.List.getRoute(target, OpType.RESTORE, backupDir = folder.encodeURL()))
             }
         } else Column(

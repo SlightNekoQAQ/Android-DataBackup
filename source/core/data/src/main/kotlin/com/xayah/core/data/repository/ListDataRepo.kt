@@ -53,8 +53,8 @@ class ListDataRepo @Inject constructor(
     fun initialize(target: Target, opType: OpType, cloudName: String, backupDir: String) {
         when (target) {
             Target.Apps -> {
-                selected = appsRepo.countSelectedApps(opType)
-                total = appsRepo.countApps(opType)
+                selected = if (opType == OpType.RESTORE) appsRepo.countRestoreApps(cloudName, backupDir, selectedOnly = true) else appsRepo.countSelectedApps(opType)
+                total = if (opType == OpType.RESTORE) appsRepo.countRestoreApps(cloudName, backupDir, selectedOnly = false) else appsRepo.countApps(opType)
                 searchQuery = MutableStateFlow("")
                 showFilterSheet = MutableStateFlow(false)
                 sortIndex = MutableStateFlow(0)
@@ -98,8 +98,8 @@ class ListDataRepo @Inject constructor(
             }
 
             Target.Files -> {
-                selected = filesRepo.countSelectedFiles(opType)
-                total = filesRepo.countFiles(opType)
+                selected = if (opType == OpType.RESTORE) filesRepo.countRestoreFiles(cloudName, backupDir, selectedOnly = true) else filesRepo.countSelectedFiles(opType)
+                total = if (opType == OpType.RESTORE) filesRepo.countRestoreFiles(cloudName, backupDir, selectedOnly = false) else filesRepo.countFiles(opType)
                 searchQuery = MutableStateFlow("")
                 showFilterSheet = MutableStateFlow(false)
                 sortIndex = MutableStateFlow(0)

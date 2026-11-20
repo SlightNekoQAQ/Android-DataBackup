@@ -127,6 +127,11 @@ class AppsRepo @Inject constructor(
     fun countApps(opType: OpType) = appsDao.countPackagesFlow(opType = opType, blocked = false)
     fun countSelectedApps(opType: OpType) = appsDao.countActivatedPackagesFlow(opType = opType, blocked = false)
 
+    fun countRestoreApps(cloud: String, backupDir: String, selectedOnly: Boolean) =
+        appsDao.queryPackagesFlow(OpType.RESTORE, cloud, backupDir).map { packages ->
+            packages.count { !it.extraInfo.blocked && (!selectedOnly || it.extraInfo.activated) }.toLong()
+        }
+
     suspend fun getLoadSystemApps() = context.readLoadSystemApps().first()
 
     suspend fun selectApp(id: Long, selected: Boolean) {

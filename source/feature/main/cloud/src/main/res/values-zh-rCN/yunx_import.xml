@@ -21,14 +21,14 @@
     <string name="yunx_manifest_partial">备份已上传，但部分清单副本未能保存。</string>
     <string name="yunx_restore_path">网盘文件已校验，可以进入恢复流程。</string>
     <string name="yunx_open_restore">在 DataBackup 中恢复</string>
-    <string name="yunx_open_restore_desc">将当前本地备份目录切换为已取回的快照，并打开重新加载页面。原有备份文件不会删除。</string>
+    <string name="yunx_open_restore_desc">将当前本地备份目录切换为已下载的备份，并打开重新加载页面。原有备份文件不会删除。</string>
     <string name="yunx_job_running">正在处理，请保持页面打开。</string>
     <string name="yunx_speed_test">测试下载速度</string>
     <string name="yunx_speed_failed">测速失败（需 1–16 MiB 文件）</string>
     <string name="yunx_speed_result">%1$d KiB/s</string>
     <string name="yunx_job_progress">已处理 %1$d / %2$d 个文件</string>
     <string name="yunx_connections">Gopeed 下载连接数：%1$d</string>
-    <string name="yunx_upload_receipt">最近一次已确认上传的网盘快照</string>
+    <string name="yunx_upload_receipt">最近一次已确认上传的网盘备份</string>
     <string name="yunx_pool_page">网盘容量池</string>
     <string name="yunx_backup_ready">/backup</string>
     <string name="yunx_backup_retry">/backup 未就绪 · 点击重试</string>

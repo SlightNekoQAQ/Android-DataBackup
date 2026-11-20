@@ -28,6 +28,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 
 class FilesRepo @Inject constructor(
@@ -74,6 +75,11 @@ class FilesRepo @Inject constructor(
 
     fun countFiles(opType: OpType) = filesDao.countFilesFlow(opType = opType, existed = true, blocked = false)
     fun countSelectedFiles(opType: OpType) = filesDao.countActivatedFilesFlow(opType = opType, existed = true, blocked = false)
+
+    fun countRestoreFiles(cloud: String, backupDir: String, selectedOnly: Boolean) =
+        filesDao.queryFilesFlow(OpType.RESTORE, cloud, backupDir).map { files ->
+            files.count { it.extraInfo.existed && !it.extraInfo.blocked && (!selectedOnly || it.extraInfo.activated) }.toLong()
+        }
 
     suspend fun selectFile(id: Long, selected: Boolean) {
         filesDao.activateById(id, selected)
