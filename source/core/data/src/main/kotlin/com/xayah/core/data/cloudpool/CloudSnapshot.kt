@@ -114,7 +114,9 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         val transfer = CloudTransfer(drives)
         try {
             onProgress(0, archives.size)
-            val slots = Semaphore(3)
+            // Native provider download implementations are not universally safe to call from
+            // several concurrent Go/CGO callbacks. Stream payloads sequentially for stability.
+            val slots = Semaphore(1)
             val progressLock = Any()
             var completed = 0
             val unavailable = java.util.Collections.synchronizedList(mutableListOf<CloudArchive>())
