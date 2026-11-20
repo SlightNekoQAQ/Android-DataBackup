@@ -101,12 +101,15 @@ class FilesRepo @Inject constructor(
         filesDao.blockByIds(ids)
     }
 
+    private fun isCloudPlan(file: MediaEntity) =
+        com.xayah.core.data.cloudpool.CloudBackupRepository(context).isRestorePlanRoot(file.indexInfo.backupDir)
+
     suspend fun deleteSelected(ids: List<Long>) {
         val filesDir = pathUtil.getLocalBackupFilesDir()
         val deletedIds = mutableListOf<Long>()
         ids.forEach {
             val file = filesDao.queryById(it)
-            if (file != null) {
+            if (file != null && !isCloudPlan(file)) {
                 val isSuccess = if (file.indexInfo.cloud.isEmpty()) {
                     val src = "${filesDir}/${file.archivesRelativeDir}"
                     rootService.deleteRecursively(src)
@@ -312,6 +315,7 @@ class FilesRepo @Inject constructor(
     }
 
     suspend fun protectFile(cloudName: String?, file: MediaEntity) {
+        if (isCloudPlan(file)) return
         if (cloudName.isNullOrEmpty().not()) {
             cloudName?.apply {
                 protectCloudFile(this, file)
@@ -348,6 +352,7 @@ class FilesRepo @Inject constructor(
     }.withLog()
 
     suspend fun deleteFile(cloudName: String?, file: MediaEntity) {
+        if (isCloudPlan(file)) return
         if (cloudName.isNullOrEmpty().not()) {
             cloudName?.apply {
                 deleteCloudFile(this, file)

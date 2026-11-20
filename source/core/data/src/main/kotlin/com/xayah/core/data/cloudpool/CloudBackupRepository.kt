@@ -325,10 +325,17 @@ class CloudBackupRepository(context: Context) {
 
     private val restorePlanName = "cloud-restore-plan.json"
 
+    /** Metadata-only restore roots must never reach operations on the real local backup. */
+    fun isRestorePlanRoot(path: String): Boolean {
+        if (path.isBlank()) return false
+        val folder = File(path).canonicalFile
+        return folder.parentFile == staging.canonicalFile && folder.name.startsWith("restore-plan-")
+    }
+
     /** Returns null only for ordinary local restore roots. Reverify the required accounts per job. */
     suspend fun openRestorePlan(root: File): RestorePlan? = withContext(Dispatchers.IO) {
         val folder = root.canonicalFile
-        if (folder.parentFile != staging.canonicalFile || !folder.name.startsWith("restore-plan-")) return@withContext null
+        if (!isRestorePlanRoot(folder.path)) return@withContext null
         val manifest = File(folder, restorePlanName)
         if (!manifest.isFile || manifest.length() !in 2L..(8L * 1024 * 1024)) throw IOException("Cloud restore plan is missing or invalid")
         val archives = CloudManifest.decode(manifest.readBytes())

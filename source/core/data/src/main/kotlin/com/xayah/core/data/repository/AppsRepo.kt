@@ -166,12 +166,15 @@ class AppsRepo @Inject constructor(
         appsDao.setEnabled(id, enabled)
     }
 
+    private fun isCloudPlan(app: PackageEntity) =
+        com.xayah.core.data.cloudpool.CloudBackupRepository(context).isRestorePlanRoot(app.indexInfo.backupDir)
+
     suspend fun deleteSelected(ids: List<Long>) {
         val appsDir = pathUtil.getLocalBackupAppsDir()
         val deletedIds = mutableListOf<Long>()
         ids.forEach {
             val app = appsDao.queryById(it)
-            if (app != null) {
+            if (app != null && !isCloudPlan(app)) {
                 val isSuccess = if (app.indexInfo.cloud.isEmpty()) {
                     val src = "${appsDir}/${app.archivesRelativeDir}"
                     rootService.deleteRecursively(src)
@@ -627,6 +630,7 @@ class AppsRepo @Inject constructor(
     }
 
     suspend fun protectApp(cloudName: String?, app: PackageEntity) {
+        if (isCloudPlan(app)) return
         if (cloudName.isNullOrEmpty().not()) {
             cloudName?.apply {
                 protectCloudApp(this, app)
@@ -663,6 +667,7 @@ class AppsRepo @Inject constructor(
     }.withLog()
 
     suspend fun deleteApp(cloudName: String?, app: PackageEntity) {
+        if (isCloudPlan(app)) return
         if (cloudName.isNullOrEmpty().not()) {
             cloudName?.apply {
                 deleteCloudApp(this, app)

@@ -27,7 +27,6 @@ fun PageCloudPool() {
     ) {
         Column(Modifier.verticalScroll(rememberScrollState()).fillMaxSize(), verticalArrangement = Arrangement.spacedBy(SizeTokens.Level24)) {
             YunxImport()
-            CloudSnapshotActions()
         }
     }
 }

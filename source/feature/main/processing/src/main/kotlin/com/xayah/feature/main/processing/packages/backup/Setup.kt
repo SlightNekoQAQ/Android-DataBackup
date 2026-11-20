@@ -72,6 +72,7 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
     val navController = LocalNavController.current!!
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val poolAvailable = com.xayah.feature.main.processing.rememberCloudPoolAvailable(uiState.storageIndex == 2)
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
     val accounts by viewModel.accounts.collectAsStateWithLifecycle()
     val isTesting by viewModel.isTesting.collectAsStateWithLifecycle()
@@ -94,10 +95,14 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
                     .paddingVertical(SizeTokens.Level8),
                 horizontalArrangement = Arrangement.spacedBy(SizeTokens.Level12, Alignment.End),
             ) {
-                if (uiState.storageIndex != 2) Button(
-                    enabled = uiState.storageType == StorageMode.Local || (uiState.cloudEntity != null && isTesting.not()),
+                Button(
+                    enabled = when (uiState.storageIndex) {
+                        2 -> poolAvailable
+                        else -> uiState.storageType == StorageMode.Local || (uiState.cloudEntity != null && isTesting.not())
+                    },
                     onClick = {
-                        com.xayah.core.data.cloudpool.CloudBackupRequest.disarm(com.xayah.core.data.cloudpool.CloudBackupRequest.Kind.APPS)
+                        if (uiState.storageIndex == 2) com.xayah.core.data.cloudpool.CloudBackupRequest.arm(com.xayah.core.data.cloudpool.CloudBackupRequest.Kind.APPS)
+                        else com.xayah.core.data.cloudpool.CloudBackupRequest.disarm(com.xayah.core.data.cloudpool.CloudBackupRequest.Kind.APPS)
                         viewModel.emitIntentOnIO(FinishSetup(navController = localNavController))
                     }) {
                     Text(text = stringResource(id = R.string._continue))
@@ -131,12 +136,10 @@ fun PagePackagesBackupProcessingSetup(localNavController: NavHostController, vie
             }
 
             Title(title = stringResource(id = R.string.storage)) {
-                if (uiState.storageIndex == 2) {
-                    com.xayah.feature.main.processing.CloudPoolBackupOption(
-                        kind = com.xayah.core.data.cloudpool.CloudBackupRequest.Kind.APPS,
-                        onStart = { viewModel.emitIntentOnIO(FinishSetup(navController = localNavController)) },
-                        onConfigure = { navController.navigateSingle(MainRoutes.CloudPool.route) },
-                    )
+                if (uiState.storageIndex == 2 && !poolAvailable) {
+                    Clickable(title = stringResource(R.string.yunx_setup_destination)) {
+                        navController.navigateSingle(MainRoutes.CloudPool.route)
+                    }
                 }
                 AnimatedVisibility(uiState.storageIndex == 1) {
                     if (accounts.isEmpty()) {
