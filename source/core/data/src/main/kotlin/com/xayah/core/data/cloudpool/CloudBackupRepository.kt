@@ -224,7 +224,7 @@ class CloudBackupRepository(context: Context) {
         val manifest = CloudRecovery(listOf(manifestOwner.asDrive()), staging).readManifest(manifestOwner.driveId, backup.objectId)
         val decoded = CloudManifest.decodeContents(manifest)
         val requiredProviders = decoded.archives.map { it.accountIdentity.substringBefore(':') }.toSet()
-        val accounts = configured(includeLegacy = true).filter { it.account.platform in requiredProviders }
+        val accounts = configured(includeLegacy = true, verifyIdentity = true).filter { it.account.platform in requiredProviders }
         require(accounts.none { ":unverified:" in it.identity }) {
             "无法验证备份所需的网盘账号。请检查网络，并从 YunX 重新导入这些账号。"
         }
