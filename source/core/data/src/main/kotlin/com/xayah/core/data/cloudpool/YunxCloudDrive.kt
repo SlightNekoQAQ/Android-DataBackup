@@ -5,6 +5,10 @@ import com.yunx.app.data.network.GopeedRestore
 import com.yunx.app.data.network.PersonalDrive
 import java.io.File
 import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** One authenticated account and its dedicated backup directory. */
 class YunxCloudDrive(
@@ -58,6 +62,24 @@ class YunxCloudDrive(
 
     override suspend fun listObjects(): List<CloudRecovery.RemoteObject> = drive.list(directoryId)
         .filterNot { it.isdir }.map { CloudRecovery.RemoteObject(it.fid, it.fname, it.fsize) }
+
+    /** The index is fetched without starting Gopeed: opening the restore screen must be cheap and
+     * must not enter the native downloader until the user actually requests archive payloads. */
+    suspend fun downloadManifest(fileId: String, destination: File) = withContext(Dispatchers.IO) {
+        val file = drive.list(directoryId).singleOrNull { it.fid == fileId && !it.isdir }
+            ?: throw IOException("Backup manifest is missing")
+        val link = drive.downloadLink(file)
+        val connection = (URL(link.downloadUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            instanceFollowRedirects = true
+            drive.downloadHeaders(link).forEach { (name, value) -> setRequestProperty(name, value) }
+        }
+        try {
+            if (connection.responseCode !in 200..299) throw IOException("网盘索引下载失败 (HTTP ${connection.responseCode})")
+            connection.inputStream.use { input -> destination.outputStream().buffered().use { output -> input.copyTo(output, 64 * 1024) } }
+        } finally { connection.disconnect() }
+    }
 
     override suspend fun download(fileId: String, destination: File) {
         val file = drive.list(directoryId).singleOrNull { it.fid == fileId && !it.isdir }
