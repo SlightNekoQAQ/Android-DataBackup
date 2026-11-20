@@ -261,6 +261,91 @@ class CloudBackupRepository(context: Context) {
         RestoreResult(retrieval.folder, missing + retrieval.unavailable, unavailableEntries, wrongAccounts)
     }
 
+    data class PreparedRestore(val folder: File, val unavailable: List<String>, val unverifiablePlatforms: Set<String>)
+
+    /** Stage only the small restore configs. The normal restore job pulls each payload when needed. */
+    suspend fun prepareRestore(backup: RemoteBackup, selected: Set<String>): PreparedRestore = withContext(Dispatchers.IO) {
+        val contents = backupContents(backup)
+        val items = contents.entries.filter { it.path in selected }
+        require(items.isNotEmpty() && items.size == selected.size)
+        val relevant = contents.archives.filter { archive -> items.any { it.includesArchive(archive.relativePath) } }
+        val providers = relevant.map { it.accountIdentity.substringBefore(':') }.toSet()
+        val accounts = configured(includeLegacy = true, providers = providers)
+        val byIdentity = accounts.filterNot { ":unverified:" in it.identity }.associateBy { it.identity }
+        val transfer = CloudTransfer(byIdentity.values.distinctBy { it.driveId }.map { it.asDrive() })
+        val root = File(staging, "restore-plan-${java.util.UUID.randomUUID()}")
+        check(root.mkdirs())
+        try {
+            val archives = relevant.associateBy { it.relativePath }
+            val unavailable = mutableListOf<String>()
+            val prepared = items.filter { item ->
+                val config = archives.getValue(item.archive)
+                val owner = byIdentity[config.accountIdentity]
+                try {
+                    if (config.byteCount > 8L * 1024 * 1024 || owner == null) throw IOException("Restore config unavailable")
+                    transfer.retrieve(config.copy(accountId = owner.driveId), root)
+                    true
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    unavailable += item.displayName
+                    false
+                }
+            }
+            if (prepared.isNotEmpty()) {
+                val payload = relevant.filter { archive -> prepared.any { it.includesArchive(archive.relativePath) } }
+                File(root, restorePlanName).writeBytes(CloudManifest.encode(payload, prepared))
+            }
+            check(File(root, "apps").isDirectory || File(root, "apps").mkdirs())
+            check(File(root, "files").isDirectory || File(root, "files").mkdirs())
+            PreparedRestore(root, unavailable, accounts.filter { ":unverified:" in it.identity }.map { it.account.platform }.toSet())
+        } catch (error: Exception) {
+            root.deleteRecursively()
+            throw error
+        }
+    }
+
+    private val restorePlanName = "cloud-restore-plan.json"
+
+    /** Returns null only for ordinary local restore roots. Reverify the required accounts per job. */
+    suspend fun openRestorePlan(root: File): RestorePlan? = withContext(Dispatchers.IO) {
+        val folder = root.canonicalFile
+        if (folder.parentFile != staging.canonicalFile || !folder.name.startsWith("restore-plan-")) return@withContext null
+        val manifest = File(folder, restorePlanName)
+        if (!manifest.isFile || manifest.length() !in 2L..(8L * 1024 * 1024)) throw IOException("Cloud restore plan is missing or invalid")
+        val archives = CloudManifest.decode(manifest.readBytes())
+        val accounts = configured(includeLegacy = true, providers = archives.map { it.accountIdentity.substringBefore(':') }.toSet())
+        val verified = accounts.filterNot { ":unverified:" in it.identity }.associateBy { it.identity }
+        RestorePlan(folder, archives.associateBy { it.relativePath }, verified.mapValues { it.value.driveId },
+            CloudTransfer(verified.values.distinctBy { it.driveId }.map { it.asDrive() }))
+    }
+
+    class RestorePlan internal constructor(
+        private val root: File,
+        private val archives: Map<String, CloudArchive>,
+        private val routes: Map<String, String>,
+        private val transfer: CloudTransfer,
+    ) {
+        fun contains(path: String) = relative(path) in archives
+        private fun relative(path: String): String {
+            val file = File(path).canonicalFile
+            require(file.path.startsWith(root.path + File.separator)) { "Archive path is outside cloud restore staging" }
+            return file.relativeTo(root).invariantSeparatorsPath
+        }
+
+        suspend fun withArchive(path: String, restore: suspend () -> Unit) = withContext(Dispatchers.IO) {
+            val archive = archives[relative(path)] ?: throw IOException("Archive missing from cloud index")
+            val route = routes[archive.accountIdentity] ?: throw IOException("Required YunX account is missing or unverifiable: ${archive.accountIdentity.substringBefore(':')}")
+            if (archive.byteCount > root.usableSpace) throw IOException("Not enough temporary storage for this archive (${archive.byteCount} bytes)")
+            val file = transfer.retrieve(archive.copy(accountId = route), root)
+            try {
+                restore()
+            } finally {
+                if (!file.delete() && file.exists()) throw IOException("Cannot release temporary restore archive")
+            }
+        }
+    }
+
     suspend fun restore(backup: RemoteBackup, onProgress: (Int, Int) -> Unit = { _, _ -> }): File =
         restoreAvailable(backup, onProgress).folder
 

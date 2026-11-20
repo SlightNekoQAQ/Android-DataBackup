@@ -78,7 +78,7 @@ class IndexViewModel @Inject constructor(
         buildList {
             if (pkgRepo.queryPackages(OpType.RESTORE, "", path).isNotEmpty()) add(Target.Apps)
             if (mediaRepo.query(OpType.RESTORE, "", path).isNotEmpty()) add(Target.Files)
-        }.also { check(it.isNotEmpty()) { "Snapshot has no restorable items" } }
+        }
     }
 
     override suspend fun onEvent(state: IndexUiState, intent: IndexUiIntent) {

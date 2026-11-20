@@ -57,6 +57,12 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
     }
 
     override suspend fun backup(type: DataType, p: PackageEntity, r: PackageEntity?, t: TaskDetailPackageEntity, dstDir: String) {
+        if (cloudRequested && cloudFailed) {
+            t.update(dataType = type, state = OperationState.ERROR, log = "Cloud backup stopped after an earlier failure")
+            t.update(dataType = type, progress = 1f)
+            t.update(processingIndex = t.processingIndex + 1)
+            return
+        }
         val result = if (type == DataType.PACKAGE_APK) {
             mPackagesBackupUtil.backupApk(p = p, t = t, r = r, dstDir = dstDir)
         } else {
@@ -113,7 +119,10 @@ internal class BackupServiceLocalImpl @Inject constructor() : AbstractBackupServ
         val file = File(path)
         requireArchiveInStaging(root, file)
         if (!file.canRead()) mRootService.setAllPermissions(path).getOrThrow()
-        writer.append(file, file.relativeTo(root).invariantSeparatorsPath)
+        writer.append(file, file.relativeTo(root).invariantSeparatorsPath) {
+            // Release only the finalized staging archive after its remote object is confirmed.
+            check(mRootService.deleteRecursively(file.path)) { "Could not release cloud backup staging file" }
+        }
     }
 
     private fun requireArchiveInStaging(root: File, file: File) {

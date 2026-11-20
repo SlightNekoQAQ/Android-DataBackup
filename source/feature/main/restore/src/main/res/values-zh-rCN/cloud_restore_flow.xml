@@ -12,9 +12,9 @@
     <string name="restore_select_all">全选</string>
     <string name="restore_unverified_accounts">无法验证以下网盘账号：%1$s。请检查从 YunX 导入的账号。</string>
     <string name="restore_unavailable">不可恢复：%1$d 项</string>
-    <string name="restore_downloading">正在下载所选项目…</string>
+    <string name="restore_downloading">正在读取恢复配置…</string>
     <string name="restore_indexing">正在整理待恢复项目…</string>
-    <string name="restore_download_selected">下载所选项目</string>
+    <string name="restore_download_selected">继续恢复</string>
     <string name="restore_continue">继续恢复</string>
     <string name="restore_unknown_time">备份时间未知</string>
 </resources>

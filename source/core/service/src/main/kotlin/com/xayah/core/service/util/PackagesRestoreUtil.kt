@@ -51,6 +51,8 @@ class PackagesRestoreUtil @Inject constructor(
         msg
     }
 
+    internal suspend fun isSelected(p: PackageEntity, dataType: DataType) = p.getDataSelected(dataType)
+
     private suspend fun PackageEntity.getDataSelected(dataType: DataType) = when (context.readSelectionType().first()) {
         SelectionType.DEFAULT -> {
             when (dataType) {

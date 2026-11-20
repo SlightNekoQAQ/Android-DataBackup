@@ -155,12 +155,14 @@ internal fun CloudRestoreContent(target: Target, viewModel: IndexViewModel, onCo
                     else runStep(R.string.restore_downloading) {
                         missing = emptyList()
                         unverifiable = emptySet()
-                        val result = repo.restoreAvailable(selected, chosen)
+                        val result = repo.prepareRestore(selected, chosen)
                         unverifiable = result.unverifiablePlatforms
-                        missing = result.unavailableEntries.ifEmpty { result.missing.map { it.relativePath } }.distinct()
-                        val selectedFolder = repo.selectedRestoreFolder(result.folder, entries, chosen, result.missing)
+                        missing = result.unavailable.distinct()
                         loading = R.string.restore_indexing
-                        if (target in viewModel.indexCloudSnapshot(selectedFolder)) ready = selectedFolder.absolutePath
+                        if (target in viewModel.indexCloudSnapshot(result.folder)) {
+                            if (missing.isEmpty() && unverifiable.isEmpty()) onContinue(result.folder.absolutePath)
+                            else ready = result.folder.absolutePath
+                        }
                         else error = emptyItems
                     }
                 },

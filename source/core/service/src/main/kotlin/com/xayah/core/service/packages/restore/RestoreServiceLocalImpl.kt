@@ -1,6 +1,10 @@
 package com.xayah.core.service.packages.restore
 
+import com.xayah.core.data.cloudpool.CloudBackupRepository
 import com.xayah.core.data.repository.PackageRepository
+import com.xayah.core.model.OperationState
+import java.io.File
+import kotlinx.coroutines.CancellationException
 import com.xayah.core.data.repository.TaskRepository
 import com.xayah.core.database.dao.PackageDao
 import com.xayah.core.database.dao.TaskDao
@@ -49,15 +53,31 @@ internal class RestoreServiceLocalImpl @Inject constructor() : AbstractRestoreSe
         )
     }
 
+    private var cloudPlan: CloudBackupRepository.RestorePlan? = null
+
     override suspend fun getPackages(): List<PackageEntity> {
+        cloudPlan = CloudBackupRepository(mContext).openRestorePlan(File(mRootDir))
         return mPackageRepo.queryActivated(OpType.RESTORE, "", mRootDir)
     }
 
     override suspend fun restore(type: DataType, userId: Int, p: PackageEntity, t: TaskDetailPackageEntity, srcDir: String) {
-        if (type == DataType.PACKAGE_APK) {
-            mPackagesRestoreUtil.restoreApk(userId = userId, p = p, t = t, srcDir = srcDir)
-        } else {
-            mPackagesRestoreUtil.restoreData(userId = userId, p = p, t = t, dataType = type, srcDir = srcDir)
+        suspend fun restoreLocal() {
+            if (type == DataType.PACKAGE_APK) mPackagesRestoreUtil.restoreApk(userId = userId, p = p, t = t, srcDir = srcDir)
+            else mPackagesRestoreUtil.restoreData(userId = userId, p = p, t = t, dataType = type, srcDir = srcDir)
+        }
+        val plan = cloudPlan
+        if (plan == null || !mPackagesRestoreUtil.isSelected(p, type)) restoreLocal()
+        else {
+            val archive = mPackageRepo.getArchiveDst(srcDir, type, p.indexInfo.compressionType)
+            if (!plan.contains(archive)) restoreLocal() // preserve ordinary required/optional archive semantics
+            else try {
+                t.update(dataType = type, state = OperationState.DOWNLOADING)
+                plan.withArchive(archive) { restoreLocal() }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                t.update(dataType = type, state = OperationState.ERROR, log = error.message ?: "Cloud restore failed")
+            }
         }
         t.update(dataType = type, progress = 1f)
         t.update(processingIndex = t.processingIndex + 1)

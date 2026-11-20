@@ -164,6 +164,27 @@ class CloudPoolTest {
         assertEquals(listOf("manifest", "payload"), downloads)
     }
 
+    @Test fun restorePlanDownloadsOnlyOneArchiveAndCleansItEvenOnRestoreFailure() = runBlocking {
+        val drive = MemoryDrive("fast")
+        val staging = temporary.newFolder()
+        val transfer = CloudTransfer(listOf(drive))
+        val source = temporary.newFile().apply { writeText("archive data") }
+        val first = transfer.store(source, "apps/a/archive", "first.bin", listOf(fast))
+        val second = transfer.store(source, "apps/b/archive", "second.bin", listOf(fast))
+        val firstFile = File(staging, first.relativePath)
+        val secondFile = File(staging, second.relativePath)
+        val plan = CloudBackupRepository.RestorePlan(staging.canonicalFile,
+            listOf(first, second).associateBy { it.relativePath }, mapOf("fast" to "fast"), transfer)
+        plan.withArchive(firstFile.path) {
+            assertEquals("archive data", firstFile.readText())
+            assertFalse(secondFile.exists())
+        }
+        assertFalse(firstFile.exists())
+        val result = runCatching { plan.withArchive(secondFile.path) { throw IOException("restore failed") } }
+        assertEquals("restore failed", result.exceptionOrNull()?.message)
+        assertFalse(secondFile.exists())
+    }
+
     @Test fun selectedEntryIncludesItsExplicitConfigButNotAdjacentItems() {
         val entry = CloudManifest.BackupEntry("apps/example", "app", "Example", "configs/example.json")
         assertTrue(entry.includesArchive("configs/example.json"))

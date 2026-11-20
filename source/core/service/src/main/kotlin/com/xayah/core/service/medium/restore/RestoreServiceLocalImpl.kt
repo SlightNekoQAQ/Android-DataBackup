@@ -1,6 +1,9 @@
 package com.xayah.core.service.medium.restore
 
+import com.xayah.core.data.cloudpool.CloudBackupRepository
 import com.xayah.core.data.repository.MediaRepository
+import java.io.File
+import kotlinx.coroutines.CancellationException
 import com.xayah.core.data.repository.TaskRepository
 import com.xayah.core.database.dao.MediaDao
 import com.xayah.core.database.dao.TaskDao
@@ -49,7 +52,10 @@ internal class RestoreServiceLocalImpl @Inject constructor() : AbstractRestoreSe
         )
     }
 
+    private var cloudPlan: CloudBackupRepository.RestorePlan? = null
+
     override suspend fun getMedium(): List<MediaEntity> {
+        cloudPlan = CloudBackupRepository(mContext).openRestorePlan(File(mRootDir))
         return mMediaRepo.queryActivated(OpType.RESTORE, "", mRootDir)
     }
 
@@ -57,7 +63,17 @@ internal class RestoreServiceLocalImpl @Inject constructor() : AbstractRestoreSe
         if (m.path.isEmpty()) {
             t.update(state = OperationState.ERROR, log = "Path is empty.")
         } else {
-            mMediumRestoreUtil.restoreMedia(m = m, t = t, srcDir = srcDir)
+            val plan = cloudPlan
+            if (plan == null) mMediumRestoreUtil.restoreMedia(m = m, t = t, srcDir = srcDir)
+            else try {
+                t.update(state = OperationState.DOWNLOADING)
+                val archive = mMediaRepo.getArchiveDst(srcDir, m.indexInfo.compressionType)
+                plan.withArchive(archive) { mMediumRestoreUtil.restoreMedia(m = m, t = t, srcDir = srcDir) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                t.update(state = OperationState.ERROR, log = error.message ?: "Cloud restore failed")
+            }
         }
         t.update(progress = 1f)
         t.update(processingIndex = t.processingIndex + 1)
