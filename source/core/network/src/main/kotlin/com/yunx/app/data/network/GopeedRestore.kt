@@ -3,12 +3,14 @@ package com.yunx.app.data.network
 import android.content.Context
 import com.gopeed.libgopeed.InvokeResultListener
 import com.gopeed.libgopeed.Libgopeed
+import com.gopeed.libgopeed.TaskEventListener
 import java.io.File
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -21,7 +23,10 @@ import org.json.JSONObject
 class GopeedRestore(context: Context) {
     private val context = context.applicationContext
 
-    class TaskFailed : IOException("Gopeed 下载任务失败")
+    class TaskFailed(val httpStatus: Int?) : IOException(
+        if (httpStatus == null) "Gopeed 下载任务失败（引擎未提供 HTTP 状态）"
+        else "Gopeed 下载任务失败（HTTP $httpStatus）",
+    )
 
     suspend fun download(
         url: String,
@@ -45,6 +50,7 @@ class GopeedRestore(context: Context) {
             val request = JSONObject().put("url", url).put("extra", JSONObject().put("header", JSONObject(headers)))
             val options = JSONObject().put("path", parent.path).put("name", name)
                 .put("extra", JSONObject().put("connections", connections))
+            lastTaskError.set(null)
             val task = call("POST", "/api/v1/tasks", JSONObject().put("req", request).put("opts", options)).optString("data")
             if (!task.matches(Regex("[A-Za-z0-9_-]{1,128}"))) throw IOException("Gopeed did not create a restore task")
             id = task
@@ -63,8 +69,12 @@ class GopeedRestore(context: Context) {
                 }
                 when (status.optString("status")) {
                     "done" -> break
-                    "error" -> throw TaskFailed()
-                    "paused" -> throw IOException("Gopeed 下载任务已暂停")
+                    "error" -> {
+                        // The status can become visible just before its asynchronous error event.
+                        if (lastTaskError.get()?.task != task) delay(250)
+                        throw TaskFailed(lastTaskError.get()?.takeIf { it.task == task }?.httpStatus)
+                    }
+                    "pause", "paused" -> throw IOException("Gopeed 下载任务已暂停")
                 }
                 delay(400)
             }
@@ -81,6 +91,9 @@ class GopeedRestore(context: Context) {
     private companion object {
         private val taskMutex = Mutex()
         private val sequence = AtomicLong()
+        private data class TaskError(val task: String, val httpStatus: Int?)
+        private val lastTaskError = AtomicReference<TaskError?>(null)
+        private val statusPattern = Regex("(?i)(?:status(?: code)?|http)[: =]+([45][0-9]{2})\\b")
         private var running = false
 
         @Synchronized
@@ -107,6 +120,16 @@ class GopeedRestore(context: Context) {
                 .put("apiEnable", false).put("refreshInterval", 500)
                 .put("downloadConfig", JSONObject().put("downloadDir", temp.path).put("maxRunning", 1))
             Libgopeed.start(config.toString())
+            // Subscribe to task.error only. Native messages may contain signed URLs; keep only a status number.
+            Libgopeed.subscribeTaskEvents(2L, object : TaskEventListener {
+                override fun onTaskEvent(eventJson: String?) {
+                    val event = runCatching { JSONObject(eventJson ?: return) }.getOrNull() ?: return
+                    if (event.optString("type") != "task.error") return
+                    val task = event.optString("taskId")
+                    val status = statusPattern.find(event.optString("error"))?.groupValues?.get(1)?.toIntOrNull()
+                    lastTaskError.set(TaskError(task, status))
+                }
+            })
             running = true
         }
 
