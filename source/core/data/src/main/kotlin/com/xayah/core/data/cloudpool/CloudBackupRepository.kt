@@ -22,7 +22,14 @@ class CloudBackupRepository(context: Context) {
         fun asDrive() = YunxCloudDrive(context, account, driveId, folder, preferences.connections(slot))
     }
 
-    data class RemoteBackup(val label: String, val provider: String, val accountKey: String, val objectId: String)
+    data class RemoteBackup(
+        val label: String,
+        val provider: String,
+        val accountKey: String,
+        val objectId: String,
+        val backupId: String = label.removePrefix("db-").substringBefore("-") ,
+        val createdAtMillis: Long = 0L,
+    )
 
     private fun checkUnique(destinations: List<Configured>): List<Configured> = destinations.also {
         require(it.map { item -> item.driveId }.distinct().size == it.size) { "Duplicate cloud drive destinations" }
@@ -158,7 +165,9 @@ class CloudBackupRepository(context: Context) {
                 CloudRecovery(listOf(account.asDrive()), staging).discover().filter {
                     it.remote.name.endsWith(CloudManifest.FILE_NAME)
                 }.forEach {
-                    found += RemoteBackup(it.remote.name, account.account.platform, account.driveId, it.remote.id)
+                    val backupId = it.remote.name.removePrefix("db-").substringBefore("-${CloudManifest.FILE_NAME}")
+                    val timestamp = backupId.substringBefore('-').toLongOrNull() ?: 0L
+                    found += RemoteBackup(it.remote.name, account.account.platform, account.driveId, it.remote.id, backupId, timestamp)
                 }
             } catch (error: CancellationException) {
                 throw error
@@ -166,7 +175,7 @@ class CloudBackupRepository(context: Context) {
                 // A wrong/expired account must not hide backups found through other accounts.
             }
         }
-        found.distinctBy { it.label.removePrefix("db-").substringBefore("-${CloudManifest.FILE_NAME}") }
+        found.distinctBy { it.backupId }.sortedByDescending { it.createdAtMillis }
     }
 
     data class FileLocation(
@@ -207,10 +216,10 @@ class CloudBackupRepository(context: Context) {
     suspend fun restoreAvailable(backup: RemoteBackup, onProgress: (Int, Int) -> Unit = { _, _ -> }): RestoreResult = restoreAvailable(backup, null, onProgress)
 
     suspend fun restoreAvailable(backup: RemoteBackup, selectedEntries: Set<String>?, onProgress: (Int, Int) -> Unit = { _, _ -> }): RestoreResult = withContext(Dispatchers.IO) {
-        val allAccounts = configured(includeLegacy = true)
+        val allAccounts = configured(includeLegacy = true, verifyIdentity = false)
         val manifestOwner = allAccounts.singleOrNull { it.driveId == backup.accountKey }
-            ?: throw IOException("The account containing this backup index is not connected")
-        val accounts = allAccounts
+            ?: throw IOException("当前登录账号与该备份索引所在网盘不匹配。请从 YunX 重新导入正确账号。")
+        val accounts = configured(includeLegacy = true)
         val manifest = CloudRecovery(listOf(manifestOwner.asDrive()), staging).readManifest(manifestOwner.driveId, backup.objectId)
         val decoded = CloudManifest.decodeContents(manifest)
         val selectedPaths = selectedEntries?.mapNotNull { selected -> decoded.entries.firstOrNull { it.path == selected }?.path }?.toSet()

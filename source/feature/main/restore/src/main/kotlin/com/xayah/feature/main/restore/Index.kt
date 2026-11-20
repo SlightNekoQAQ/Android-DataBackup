@@ -146,25 +146,31 @@ fun PageRestore() {
                 if (busy) Clickable(readOnly = true, title = "正在读取网盘备份…")
                 error?.let { Clickable(readOnly = true, title = it) }
                 backups.forEach { backup ->
-                    Clickable(title = backup.label.removePrefix("db-").substringBefore("-${com.xayah.core.data.cloudpool.CloudManifest.FILE_NAME}"), value = backup.provider, enabled = !busy) {
+                    val dateLabel = if (backup.createdAtMillis > 0) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(backup.createdAtMillis)) else "时间未知"
+                    Clickable(title = dateLabel, value = backup.provider, enabled = !busy) {
                         scope.launch {
                             busy = true
                             selected = backup
-                            runCatching { cloudRepo.backupContents(backup) }
-                                .onSuccess { content ->
-                                    entries = content.entries
-                                    unavailableAccounts = content.missingAccounts.filterNot { it.endsWith(":wrong-account") }.toSet()
-                                    unverifiablePlatforms = content.missingAccounts.filter { it.endsWith(":wrong-account") }.map { it.removeSuffix(":wrong-account") }.toSet()
-                                    chosen = content.entries.map { it.path }.toSet()
-                                    missing = emptyList()
-                                }
-                                .onFailure { error = it.message ?: "读取备份索引失败" }
-                            busy = false
+                            try {
+                                val content = cloudRepo.backupContents(backup)
+                                entries = content.entries
+                                unavailableAccounts = content.missingAccounts.filterNot { it.endsWith(":wrong-account") }.toSet()
+                                unverifiablePlatforms = content.missingAccounts.filter { it.endsWith(":wrong-account") }.map { it.removeSuffix(":wrong-account") }.toSet()
+                                chosen = content.entries.map { it.path }.toSet()
+                                missing = emptyList()
+                                error = null
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (failure: Exception) {
+                                error = failure.message ?: "读取备份索引失败"
+                            } finally {
+                                busy = false
+                            }
                         }
                     }
                 }
                 selected?.let { backup ->
-                    Text("已选择：${backup.label}")
+                    Text("已选择：${if (backup.createdAtMillis > 0) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(backup.createdAtMillis)) else "时间未知"}")
                     entries.forEach { entry ->
                         val checked = entry.path in chosen
                         Clickable(title = "${if (entry.kind == "app") "应用" else "文件"} · ${entry.displayName}", value = if (checked) "已选择" else "未选择") {
@@ -177,20 +183,24 @@ fun PageRestore() {
                     Clickable(enabled = !busy && chosen.isNotEmpty(), title = if (busy) "正在恢复…" else "恢复所选项目") {
                         scope.launch {
                             busy = true
-                            runCatching { cloudRepo.restoreAvailable(backup, chosen) }
-                                .onSuccess { result ->
-                                    missing = result.unavailableEntries + result.missing.map { it.relativePath }.distinct()
-                                    unverifiablePlatforms = result.unverifiablePlatforms
-                                    val selectedFolder = cloudRepo.selectedRestoreFolder(result.folder, entries, chosen)
-                                    runCatching { viewModel.indexCloudSnapshot(selectedFolder) }
-                                        .onFailure { error = it.message ?: "索引已下载项目失败" }
-                                        .onSuccess { targets ->
-                                            val selectedTargets = entries.filter { it.path in chosen }.map { if (it.kind == "app") Target.Apps else Target.Files }.distinct()
-                                            selectedTargets.forEach { target -> if (target in targets) navController.navigateSingle(MainRoutes.List.getRoute(target, OpType.RESTORE, backupDir = selectedFolder.canonicalPath.encodeURL())) }
-                                        }
+                            try {
+                                val result = cloudRepo.restoreAvailable(backup, chosen)
+                                missing = result.unavailableEntries + result.missing.map { it.relativePath }.distinct()
+                                unverifiablePlatforms = result.unverifiablePlatforms
+                                val selectedFolder = cloudRepo.selectedRestoreFolder(result.folder, entries, chosen)
+                                val targets = viewModel.indexCloudSnapshot(selectedFolder)
+                                val selectedTargets = entries.filter { it.path in chosen }.map { if (it.kind == "app") Target.Apps else Target.Files }.distinct()
+                                selectedTargets.filter { it in targets }.forEach { target ->
+                                    navController.navigateSingle(MainRoutes.List.getRoute(target, OpType.RESTORE, backupDir = selectedFolder.canonicalPath.encodeURL()))
                                 }
-                                .onFailure { error = it.message ?: "下载云盘备份失败" }
-                            busy = false
+                                error = null
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (failure: Exception) {
+                                error = failure.message ?: "下载云盘备份失败"
+                            } finally {
+                                busy = false
+                            }
                         }
                     }
                 }

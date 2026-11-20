@@ -24,7 +24,8 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
     fun begin(targets: List<CloudTarget>, useManualOrder: Boolean = false): Writer = Writer(targets, useManualOrder)
 
     inner class Writer internal constructor(private val targets: List<CloudTarget>, private val manual: Boolean) {
-        private val id = UUID.randomUUID().toString()
+        private val createdAtMillis = System.currentTimeMillis()
+        private val id = "$createdAtMillis-${UUID.randomUUID()}"
         private val transfer = CloudTransfer(drives)
         private val entries = mutableListOf<CloudArchive>()
         private suspend fun identity(accountId: String): String {
