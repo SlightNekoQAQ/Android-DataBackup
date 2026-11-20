@@ -9,6 +9,8 @@ import com.yunx.app.data.upload.UploadSource
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /** Only the application supplies the credentials. No diagnostic or persistence responsibilities. */
@@ -23,6 +25,9 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
         else "$cookie; authorization=${required("authorization")}"
 
     private val quark by lazy { QuarkApi() }
+    private val quarkSessionLock = kotlinx.coroutines.sync.Mutex()
+    private var quarkSession: String? = null
+    private var quarkSessionRefreshedAt: Long? = null
     private val uc by lazy { UCApi() }
     private val baidu by lazy { BaiduApi() }
     private val c139 by lazy { C139Api(deviceInfoProvider = { C139DeviceInfo.from(context.applicationContext) }) }
@@ -115,23 +120,52 @@ class PersonalDrive(context: Context, val platform: String, fields: Map<String, 
         throw IOException("上传已返回，但未能确认备份文件存在")
     }
 
+    class DownloadRequest(val url: String, val headers: Map<String, String>)
+
+    /** Keep the signed URL and the exact session used to obtain it together. */
+    suspend fun downloadRequest(file: ShareFile, refreshSession: Boolean = false): DownloadRequest {
+        if (platform != "quark") {
+            val link = downloadLink(file)
+            return DownloadRequest(link.downloadUrl, downloadHeaders(link))
+        }
+        return quarkSessionLock.withLock {
+            val now = android.os.SystemClock.elapsedRealtime()
+            val existing = quarkSession ?: cookie
+            val lastRefresh = quarkSessionRefreshedAt
+            val session = if (refreshSession || lastRefresh == null || now - lastRefresh >= QuarkConstants.PUUS_REFRESH_INTERVAL_MS) {
+                val refreshed = quark.refreshSession(existing)
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                quarkSessionRefreshedAt = now
+                (refreshed ?: existing).also { quarkSession = it }
+            } else existing
+            require(!file.isdir)
+            val link = requireDownloadLink(quark.getDownloadLink(file.fid, session))
+            DownloadRequest(link.downloadUrl, mapOf(
+                "Cookie" to session,
+                "User-Agent" to QuarkConstants.API_USER_AGENT,
+                "Referer" to QuarkConstants.DOWNLOAD_REFERER,
+            ))
+        }
+    }
+
     /** Does not create a public share for private backup contents. */
-    suspend fun downloadLink(file: ShareFile): DownloadLink {
+    private suspend fun downloadLink(file: ShareFile): DownloadLink {
         require(!file.isdir)
-        return when (platform) {
-            "quark" -> quark.getDownloadLink(file.fid, cookie)
+        return requireDownloadLink(when (platform) {
             "uc" -> uc.cloudGetDownloadLink(file.fid, cookie)
             "baidu" -> DownloadLink(file.fid, file.fname, baidu.locateDownload(file.fidToken, cookie), file.fsize)
             "c139" -> c139.getDownloadUrl(file.fid, c139Cookie)
             "pan123" -> pan123.getDownloadLink(file, token)
             "pan115" -> pan115.getDownloadLink(file, cookie)
             else -> unsupported()
-        }?.takeIf { it.downloadUrl.startsWith("https://") && !it.isHls }
-            ?: throw IOException("网盘未返回可用的原始文件下载地址")
+        })
     }
 
-    fun downloadHeaders(link: DownloadLink): Map<String, String> = when (platform) {
-        "quark" -> mapOf("Cookie" to cookie, "User-Agent" to QuarkConstants.API_USER_AGENT, "Referer" to QuarkConstants.DOWNLOAD_REFERER)
+    private fun requireDownloadLink(link: DownloadLink?): DownloadLink =
+        link?.takeIf { it.downloadUrl.startsWith("https://") && !it.isHls }
+            ?: throw IOException("网盘未返回可用的原始文件下载地址")
+
+    private fun downloadHeaders(link: DownloadLink): Map<String, String> = when (platform) {
         "uc" -> mapOf("Cookie" to cookie, "User-Agent" to UCConstants.USER_AGENT, "Referer" to UCConstants.DOWNLOAD_REFERER, "Origin" to UCConstants.WEB_ORIGIN)
         "baidu" -> mapOf("Cookie" to cookie, "User-Agent" to BaiduConstants.UA_NETDISK)
         "c139" -> mapOf("User-Agent" to C139Constants.PC_UA, "Referer" to "https://yun.139.com/")

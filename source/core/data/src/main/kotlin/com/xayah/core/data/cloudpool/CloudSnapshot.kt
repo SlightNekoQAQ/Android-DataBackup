@@ -5,11 +5,6 @@ import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /**
@@ -114,29 +109,18 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
         val transfer = CloudTransfer(drives)
         try {
             onProgress(0, archives.size)
-            // Native provider download implementations are not universally safe to call from
-            // several concurrent Go/CGO callbacks. Stream payloads sequentially for stability.
-            val slots = Semaphore(1)
-            val progressLock = Any()
-            var completed = 0
-            val unavailable = java.util.Collections.synchronizedList(mutableListOf<CloudArchive>())
-            coroutineScope {
-                archives.map { archive ->
-                    async(Dispatchers.IO) {
-                        slots.withPermit {
-                            try {
-                                transfer.retrieve(archive, staging)
-                            } catch (error: CancellationException) {
-                                throw error
-                            } catch (_: Exception) {
-                                unavailable += archive
-                            }
-                            synchronized(progressLock) { onProgress(++completed, archives.size) }
-                        }
-                    }
-                }.awaitAll()
+            val unavailable = mutableListOf<CloudArchive>()
+            archives.forEachIndexed { index, archive ->
+                try {
+                    transfer.retrieve(archive, staging)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Exception) {
+                    unavailable += archive
+                }
+                onProgress(index + 1, archives.size)
             }
-            RetrievalResult(staging, unavailable.toList())
+            RetrievalResult(staging, unavailable)
         } catch (error: Exception) {
             staging.deleteRecursively()
             throw error

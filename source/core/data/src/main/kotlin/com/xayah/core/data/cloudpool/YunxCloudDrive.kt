@@ -15,6 +15,7 @@ class YunxCloudDrive(
     private val connections: Int,
 ) : CloudDrive {
     private val importedAccount = account
+    private val platform = account.platform
     private val driveContext = context.applicationContext
     /** Account identity returned by the provider API, consistent across devices. */
     suspend fun verifiedAccountIdentity(): String = importedAccount.verifiedIdentity(driveContext)
@@ -66,7 +67,16 @@ class YunxCloudDrive(
     private suspend fun download(fileId: String, destination: File, connections: Int) {
         val file = drive.list(directoryId).singleOrNull { it.fid == fileId && !it.isdir }
             ?: throw IOException("Archive is missing in its cloud directory")
-        val link = drive.downloadLink(file)
-        gopeed.download(link.downloadUrl, drive.downloadHeaders(link), destination, connections)
+        suspend fun fetch(refreshSession: Boolean) {
+            val request = drive.downloadRequest(file, refreshSession)
+            gopeed.download(request.url, request.headers, destination, connections)
+        }
+        try {
+            fetch(refreshSession = false)
+        } catch (error: GopeedRestore.TaskFailed) {
+            if (platform != "quark") throw error
+            // Retry once with a fresh session AND a newly signed link; never mix accounts.
+            fetch(refreshSession = true)
+        }
     }
 }

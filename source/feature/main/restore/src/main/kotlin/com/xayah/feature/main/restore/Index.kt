@@ -209,7 +209,7 @@ fun PageRestore() {
                                 val result = cloudRepo.restoreAvailable(backup, chosen)
                                 missing = result.unavailableEntries + result.missing.map { it.relativePath }.distinct()
                                 unverifiablePlatforms = result.unverifiablePlatforms
-                                val selectedFolder = cloudRepo.selectedRestoreFolder(result.folder, entries, chosen)
+                                val selectedFolder = cloudRepo.selectedRestoreFolder(result.folder, entries, chosen, result.missing)
                                 busyLabel = "正在索引下载内容…"
                                 val targets = viewModel.indexCloudSnapshot(selectedFolder)
                                 val selectedTargets = entries.filter { it.path in chosen }.map { if (it.kind == "app") Target.Apps else Target.Files }.distinct()

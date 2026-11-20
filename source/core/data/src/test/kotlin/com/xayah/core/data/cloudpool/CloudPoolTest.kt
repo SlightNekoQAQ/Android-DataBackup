@@ -134,6 +134,43 @@ class CloudPoolTest {
         assertTrue(corrupt.exceptionOrNull() is IOException)
     }
 
+    @Test fun previewReadsOnlyManifestAndMissingArchiveDoesNotBlockOtherDownloads() = runBlocking {
+        val good = MemoryDrive("fast")
+        val bad = MemoryDrive("slow")
+        val root = temporary.newFolder()
+        val writer = CloudSnapshot(listOf(good, bad), root).begin(listOf(
+            slow.copy(freeBytes = 10, priority = 0), fast.copy(freeBytes = 150, maxFileBytes = null, priority = 1),
+        ), useManualOrder = true)
+        writer.append(CloudSnapshot.Source("apps/bad/archive", temporary.newFile().apply { writeText("missing") }))
+        writer.append(CloudSnapshot.Source("apps/good/archive", temporary.newFile().apply { writeText("available") }))
+        val published = writer.finish()
+        val downloads = mutableListOf<String>()
+        val tracked = object : CloudDrive by good {
+            override suspend fun downloadManifest(fileId: String, destination: File) {
+                downloads += "manifest"
+                good.download(fileId, destination)
+            }
+            override suspend fun download(fileId: String, destination: File) {
+                downloads += "payload"
+                good.download(fileId, destination)
+            }
+        }
+        val recovery = CloudRecovery(listOf(tracked), root)
+        val manifest = recovery.readManifest("fast", published.manifestCopies.getValue("fast"))
+        assertEquals(listOf("manifest"), downloads)
+        val result = CloudSnapshot(listOf(tracked), root).retrieveAvailable(manifest)
+        assertEquals(listOf("apps/bad/archive"), result.unavailable.map { it.relativePath })
+        assertEquals("available", File(result.folder, "apps/good/archive").readText())
+        assertEquals(listOf("manifest", "payload"), downloads)
+    }
+
+    @Test fun selectedEntryIncludesItsExplicitConfigButNotAdjacentItems() {
+        val entry = CloudManifest.BackupEntry("apps/example", "app", "Example", "configs/example.json")
+        assertTrue(entry.includesArchive("configs/example.json"))
+        assertTrue(entry.includesArchive("apps/example/archive"))
+        assertFalse(entry.includesArchive("apps/example-other/archive"))
+    }
+
     @Test fun failedArchiveIsKeptAndIncompleteSnapshotCannotBePublished() = runBlocking {
         val drive = MemoryDrive("fast", IOException("offline"))
         val writer = CloudSnapshot(listOf(drive), temporary.newFolder()).begin(listOf(fast.copy(maxFileBytes = null)))

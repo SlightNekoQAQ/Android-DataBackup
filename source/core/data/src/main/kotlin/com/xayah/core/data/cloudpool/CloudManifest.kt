@@ -15,7 +15,9 @@ object CloudManifest {
     private const val maximumSize = 8 * 1024 * 1024
     private val gson = Gson()
 
-    data class BackupEntry(val path: String, val kind: String, val displayName: String, val archive: String)
+    data class BackupEntry(val path: String, val kind: String, val displayName: String, val archive: String) {
+        fun includesArchive(relativePath: String): Boolean = relativePath == archive || relativePath.startsWith("$path/")
+    }
 
     data class Contents(val archives: List<CloudArchive>, val entries: List<BackupEntry>)
 

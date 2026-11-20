@@ -21,6 +21,8 @@ import org.json.JSONObject
 class GopeedRestore(context: Context) {
     private val context = context.applicationContext
 
+    class TaskFailed : IOException("Gopeed 下载任务失败")
+
     suspend fun download(
         url: String,
         headers: Map<String, String>,
@@ -61,7 +63,8 @@ class GopeedRestore(context: Context) {
                 }
                 when (status.optString("status")) {
                     "done" -> break
-                    "error", "paused" -> throw IOException("Gopeed could not download the backup")
+                    "error" -> throw TaskFailed()
+                    "paused" -> throw IOException("Gopeed 下载任务已暂停")
                 }
                 delay(400)
             }

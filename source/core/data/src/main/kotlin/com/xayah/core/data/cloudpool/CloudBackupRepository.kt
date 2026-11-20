@@ -35,9 +35,9 @@ class CloudBackupRepository(context: Context) {
         require(it.map { item -> item.driveId }.distinct().size == it.size) { "Duplicate cloud drive destinations" }
     }
 
-    private suspend fun configured(includeLegacy: Boolean = false, verifyIdentity: Boolean = true): List<Configured> {
+    private suspend fun configured(includeLegacy: Boolean = false, verifyIdentity: Boolean = true, providers: Set<String>? = null): List<Configured> {
         val accounts = vault.load().mapIndexedNotNull { slot, account ->
-            if (!YunxCredentialImport.supports(account.platform)) return@mapIndexedNotNull null
+            if (!YunxCredentialImport.supports(account.platform) || (providers != null && account.platform !in providers)) return@mapIndexedNotNull null
             val folder = preferences.defaultFolder(slot) ?: preferences.read(slot).takeIf { includeLegacy } ?: return@mapIndexedNotNull null
             val identity = if (!verifyIdentity) "${account.platform}:${account.identity.ifBlank { slot.toString() }}" else try {
                 account.verifiedIdentity(context)
@@ -225,13 +225,13 @@ class CloudBackupRepository(context: Context) {
         val decoded = CloudManifest.decodeContents(manifest)
         val selectedPaths = selectedEntries?.mapNotNull { selected -> decoded.entries.firstOrNull { it.path == selected }?.path }?.toSet()
         require(selectedEntries == null || selectedPaths == selectedEntries) { "Selected backup entry is not present in the index" }
-        val selectedItemPaths = selectedPaths?.map { it.trimEnd('/') + "/" }
-        val relevantArchives = if (selectedItemPaths == null) decoded.archives else decoded.archives.filter { archive ->
-            selectedItemPaths.any { archive.relativePath.startsWith(it) }
+        val selectedItems = decoded.entries.filter { selectedPaths == null || it.path in selectedPaths }
+        val relevantArchives = if (selectedPaths == null) decoded.archives else decoded.archives.filter { archive ->
+            selectedItems.any { it.includesArchive(archive.relativePath) }
         }
         val requiredIdentities = relevantArchives.map { it.accountIdentity }.toSet()
         val requiredProviders = requiredIdentities.map { it.substringBefore(':') }.toSet()
-        val accounts = configured(includeLegacy = true, verifyIdentity = true).filter { it.account.platform in requiredProviders }
+        val accounts = configured(includeLegacy = true, providers = requiredProviders)
         val byIdentity = accounts.associateBy { it.identity }
         val availableByIdentity = byIdentity.filterValues { !it.identity.contains(":unverified:") && it.key in requiredIdentities }
         val missing = relevantArchives.filter { it.accountIdentity !in availableByIdentity }
@@ -257,11 +257,7 @@ class CloudBackupRepository(context: Context) {
         val retrievalIndex = CloudManifest.encode(routedArchives)
         val retrieval = CloudSnapshot(accessibleDrives, staging).retrieveAvailable(retrievalIndex, onProgress)
         val failedPaths = (missing + retrieval.unavailable).map { it.relativePath }.toSet()
-        val unavailableEntries = selectedPaths.orEmpty().flatMap { selected ->
-            decoded.entries.filter { entry ->
-                entry.path == selected && failedPaths.any { path -> path == entry.archive || path.startsWith("${entry.path}/") }
-            }.map { it.displayName }
-        }
+        val unavailableEntries = selectedItems.filter { entry -> failedPaths.any(entry::includesArchive) }.map { it.displayName }
         RestoreResult(retrieval.folder, missing + retrieval.unavailable, unavailableEntries, wrongAccounts)
     }
 
@@ -289,33 +285,19 @@ class CloudBackupRepository(context: Context) {
 
     suspend fun discoverBackups(): List<RemoteBackup> = available()
 
-    suspend fun selectedRestoreFolder(folder: File, entries: List<CloudManifest.BackupEntry>, selected: Set<String>): File = withContext(Dispatchers.IO) {
+    suspend fun selectedRestoreFolder(folder: File, entries: List<CloudManifest.BackupEntry>, selected: Set<String>, missing: List<CloudArchive> = emptyList()): File = withContext(Dispatchers.IO) {
         val root = folder.canonicalFile
         val stagingRoot = staging.canonicalFile
         require(root.path.startsWith(stagingRoot.path + File.separator))
         val selectedEntries = entries.filter { it.path in selected }
-        val indexFiles = selectedEntries.map { it.archive }.toSet()
+        val indexFiles = selectedEntries.filter { entry -> missing.none { entry.includesArchive(it.relativePath) } }
+            .map { it.archive }.toSet()
         listOf("apps" to "package_restore_config.json", "files" to "media_restore_config.json").forEach { (category, name) ->
             File(root, category).walkTopDown().filter { it.isFile && it.name == name }
                 .filter { it.relativeTo(root).invariantSeparatorsPath !in indexFiles }.forEach { it.delete() }
         }
-        val apps = selectedEntries.filter { it.kind == "app" }
-        val files = selectedEntries.filter { it.kind == "file" }
-        val appDir = File(root, "apps")
-        val fileDir = File(root, "files")
-        appDir.mkdirs()
-        fileDir.mkdirs()
-        apps.forEach { File(appDir, it.path.removePrefix("apps/")).mkdirs() }
-        files.forEach { File(fileDir, it.path.removePrefix("files/")).mkdirs() }
-        val appRoots = entries.filter { it.kind == "app" }.map { it.path.removePrefix("apps/") }.toSet()
-        val fileRoots = entries.filter { it.kind == "file" }.map { it.path.removePrefix("files/") }.toSet()
-        appRoots.forEach { relative -> File(appDir, relative).mkdirs() }
-        fileRoots.forEach { relative -> File(fileDir, relative).mkdirs() }
-        selectedEntries.forEach { entry ->
-            val source = File(root, entry.archive).canonicalFile
-            require(source.path.startsWith(root.path + File.separator) && source.isFile) { "Selected item index was not downloaded" }
-            require(source == File(root, entry.archive).canonicalFile)
-        }
+        File(root, "apps").mkdirs()
+        File(root, "files").mkdirs()
         root
     }
 
