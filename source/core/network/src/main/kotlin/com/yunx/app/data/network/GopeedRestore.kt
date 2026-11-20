@@ -88,9 +88,19 @@ class GopeedRestore(context: Context) {
             } catch (_: UnsatisfiedLinkError) {
                 throw IOException("Gopeed kernel is unavailable for this device")
             }
-            val temp = File(root, "gopeed-tmp").apply { mkdirs() }
+            val store = File(root, "gopeed-store")
+            val temp = File(root, "gopeed-tmp")
+            // Even in memory mode Gopeed creates logs under storageDir. An omitted
+            // directory makes it try to create ./logs in Android's read-only cwd.
+            for (dir in listOf(store, File(store, "logs"), temp)) {
+                if ((!dir.isDirectory && !dir.mkdirs() && !dir.isDirectory) || !dir.canWrite()) {
+                    throw IOException("Cannot prepare private Gopeed directories")
+                }
+            }
             // Credentials can appear in request metadata; do not persist a Bolt task database.
-            val config = JSONObject().put("storage", "mem").put("tempDir", temp.path + File.separator)
+            val config = JSONObject().put("storage", "mem")
+                .put("storageDir", store.absolutePath + File.separator)
+                .put("tempDir", temp.absolutePath + File.separator)
                 .put("apiEnable", false).put("refreshInterval", 500)
                 .put("downloadConfig", JSONObject().put("downloadDir", temp.path).put("maxRunning", 1))
             Libgopeed.start(config.toString())

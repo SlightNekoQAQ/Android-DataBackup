@@ -248,11 +248,13 @@ class CloudBackupRepository(context: Context) {
             check(staging.isDirectory || staging.mkdirs())
             val emptyFolder = File(staging, "snapshot-empty-${java.util.UUID.randomUUID()}")
             check(emptyFolder.mkdirs())
-            return@withContext RestoreResult(emptyFolder, missing)
+            val unavailable = decoded.entries.filter { selectedPaths == null || it.path in selectedPaths }
+                .map { it.displayName }
+            return@withContext RestoreResult(emptyFolder, missing, unavailable, wrongAccounts)
         }
-        val retrievalIndex = CloudManifest.encode(routedArchives, decoded.entries.filter { entry ->
-            selectedPaths == null || entry.path in selectedPaths
-        })
+        // This internal index routes available archives only. Entries in the original index can
+        // legitimately reference missing archives and must not invalidate the available subset.
+        val retrievalIndex = CloudManifest.encode(routedArchives)
         val retrieval = CloudSnapshot(accessibleDrives, staging).retrieveAvailable(retrievalIndex, onProgress)
         val failedPaths = (missing + retrieval.unavailable).map { it.relativePath }.toSet()
         val unavailableEntries = selectedPaths.orEmpty().flatMap { selected ->

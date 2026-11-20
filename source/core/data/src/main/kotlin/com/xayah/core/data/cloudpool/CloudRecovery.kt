@@ -35,7 +35,7 @@ class CloudRecovery(private val drives: List<CloudDrive>, private val staging: F
         check(staging.isDirectory || staging.mkdirs() || staging.isDirectory)
         val file = File.createTempFile("index-", ".partial", staging)
         try {
-            if (drive is YunxCloudDrive) drive.downloadManifest(remote.id, file) else drive.download(remote.id, file)
+            drive.downloadManifest(remote.id, file)
             if (file.length() != remote.bytes) throw IOException("Incomplete backup manifest")
             file.readBytes()
         } finally {

@@ -12,6 +12,7 @@ interface CloudDrive {
     suspend fun listObjects(): List<CloudRecovery.RemoteObject>
     suspend fun upload(source: File, remoteName: String): String
     suspend fun download(fileId: String, destination: File)
+    suspend fun downloadManifest(fileId: String, destination: File) = download(fileId, destination)
 }
 
 /** Explicit provider quota or object-size rejection, not a generic network/authorization error. */
