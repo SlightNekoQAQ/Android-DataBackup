@@ -13,6 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
 /** In-process Gopeed; no HTTP listener is opened. A restore writes into private staging. */
@@ -26,6 +28,7 @@ class GopeedRestore(context: Context) {
         connections: Int,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
     ) = withContext(Dispatchers.IO) {
+        taskMutex.withLock {
         require(url.startsWith("https://"))
         require(connections in 1..32)
         val root = context.noBackupFilesDir
@@ -69,9 +72,11 @@ class GopeedRestore(context: Context) {
                 temporary.delete()
             }
         }
+        }
     }
 
     private companion object {
+        private val taskMutex = Mutex()
         private val sequence = AtomicLong()
         private var running = false
 
@@ -87,7 +92,7 @@ class GopeedRestore(context: Context) {
             // Credentials can appear in request metadata; do not persist a Bolt task database.
             val config = JSONObject().put("storage", "mem").put("tempDir", temp.path + File.separator)
                 .put("apiEnable", false).put("refreshInterval", 500)
-                .put("downloadConfig", JSONObject().put("downloadDir", temp.path).put("maxRunning", 3))
+                .put("downloadConfig", JSONObject().put("downloadDir", temp.path).put("maxRunning", 1))
             Libgopeed.start(config.toString())
             running = true
         }

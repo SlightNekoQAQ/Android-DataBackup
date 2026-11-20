@@ -1,13 +1,10 @@
 package com.xayah.core.data.cloudpool
 
 import android.content.Context
+import com.yunx.app.data.network.GopeedRestore
 import com.yunx.app.data.network.PersonalDrive
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 /** One authenticated account and its dedicated backup directory. */
 class YunxCloudDrive(
@@ -22,6 +19,7 @@ class YunxCloudDrive(
     /** Account identity returned by the provider API, consistent across devices. */
     suspend fun verifiedAccountIdentity(): String = importedAccount.verifiedIdentity(driveContext)
     private val drive = PersonalDrive(context, account.platform, account.credentialFields())
+    private val gopeed = GopeedRestore(context)
 
     init {
         require(directoryId.isNotBlank())
@@ -61,25 +59,10 @@ class YunxCloudDrive(
     override suspend fun listObjects(): List<CloudRecovery.RemoteObject> = drive.list(directoryId)
         .filterNot { it.isdir }.map { CloudRecovery.RemoteObject(it.fid, it.fname, it.fsize) }
 
-    override suspend fun download(fileId: String, destination: File) = withContext(Dispatchers.IO) {
+    override suspend fun download(fileId: String, destination: File) {
         val file = drive.list(directoryId).singleOrNull { it.fid == fileId && !it.isdir }
             ?: throw IOException("Archive is missing in its cloud directory")
         val link = drive.downloadLink(file)
-        val connection = (URL(link.downloadUrl).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 20_000
-            readTimeout = 60_000
-            instanceFollowRedirects = true
-            drive.downloadHeaders(link).forEach { (name, value) -> setRequestProperty(name, value) }
-        }
-        try {
-            val status = connection.responseCode
-            if (status !in 200..299) throw IOException("网盘下载失败 (HTTP $status)")
-            connection.inputStream.use { input ->
-                destination.outputStream().buffered().use { output -> input.copyTo(output, 128 * 1024) }
-            }
-        } finally {
-            connection.disconnect()
-        }
+        gopeed.download(link.downloadUrl, drive.downloadHeaders(link), destination, connections)
     }
 }
