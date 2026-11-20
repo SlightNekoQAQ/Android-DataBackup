@@ -50,6 +50,7 @@ fun RestoreScaffold(
     scrollBehavior: TopAppBarScrollBehavior,
     title: String,
     actions: @Composable (RowScope.() -> Unit)? = null,
+    onBackClick: (() -> Unit)? = null,
     content: @Composable (BoxScope.() -> Unit)
 ) {
     Scaffold(
@@ -58,6 +59,7 @@ fun RestoreScaffold(
             SecondaryLargeTopBar(
                 scrollBehavior = scrollBehavior,
                 title = title,
+                onBackClick = onBackClick,
             )
         },
     ) { innerPadding ->

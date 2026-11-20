@@ -1,0 +1,20 @@
+<resources>
+    <string name="restore_reading_backups">正在读取备份列表…</string>
+    <string name="restore_reading_contents">正在读取备份目录…</string>
+    <string name="restore_cloud_failed">无法读取或下载备份</string>
+    <string name="restore_no_items">此分类没有可恢复的项目</string>
+    <string name="restore_choose_backup">选择备份</string>
+    <string name="restore_refresh">刷新</string>
+    <string name="restore_no_backups">没有找到云盘备份</string>
+    <string name="restore_change_backup">更换备份</string>
+    <string name="restore_selection_count">已选 %1$d 项，共 %2$d 项</string>
+    <string name="restore_clear_selection">取消全选</string>
+    <string name="restore_select_all">全选</string>
+    <string name="restore_unverified_accounts">无法验证以下网盘账号：%1$s。请检查从 YunX 导入的账号。</string>
+    <string name="restore_unavailable">不可恢复：%1$d 项</string>
+    <string name="restore_downloading">正在下载所选项目…</string>
+    <string name="restore_indexing">正在整理待恢复项目…</string>
+    <string name="restore_download_selected">下载所选项目</string>
+    <string name="restore_continue">继续恢复</string>
+    <string name="restore_unknown_time">备份时间未知</string>
+</resources>

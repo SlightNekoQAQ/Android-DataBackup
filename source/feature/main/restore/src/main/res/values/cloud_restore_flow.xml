@@ -1,0 +1,20 @@
+<resources>
+    <string name="restore_reading_backups">Loading backups…</string>
+    <string name="restore_reading_contents">Loading backup contents…</string>
+    <string name="restore_cloud_failed">Could not load or download the backup</string>
+    <string name="restore_no_items">No restorable items in this category</string>
+    <string name="restore_choose_backup">Choose a backup</string>
+    <string name="restore_refresh">Refresh</string>
+    <string name="restore_no_backups">No cloud backups found</string>
+    <string name="restore_change_backup">Change backup</string>
+    <string name="restore_selection_count">Selected %1$d of %2$d</string>
+    <string name="restore_clear_selection">Clear selection</string>
+    <string name="restore_select_all">Select all</string>
+    <string name="restore_unverified_accounts">Could not verify accounts for %1$s. Check the accounts imported from YunX.</string>
+    <string name="restore_unavailable">Unavailable: %1$d</string>
+    <string name="restore_downloading">Downloading selected items…</string>
+    <string name="restore_indexing">Preparing items for restore…</string>
+    <string name="restore_download_selected">Download selected items</string>
+    <string name="restore_continue">Continue to restore</string>
+    <string name="restore_unknown_time">Unknown backup time</string>
+</resources>
