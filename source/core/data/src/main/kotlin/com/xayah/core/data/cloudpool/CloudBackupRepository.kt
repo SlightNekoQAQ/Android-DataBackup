@@ -158,7 +158,9 @@ class CloudBackupRepository(context: Context) {
 
     suspend fun available(): List<RemoteBackup> = withContext(Dispatchers.IO) {
         if (configured(verifyIdentity = false).isEmpty()) prepareDestinations()
-        val accounts = configured(includeLegacy = true, verifyIdentity = true)
+        // Discovery only lists index copies; never perform one network identity lookup per
+        // configured account while rendering the restore screen.
+        val accounts = configured(includeLegacy = true, verifyIdentity = false)
         val found = mutableListOf<RemoteBackup>()
         for (account in accounts) {
             try {
@@ -218,8 +220,11 @@ class CloudBackupRepository(context: Context) {
     suspend fun restoreAvailable(backup: RemoteBackup, selectedEntries: Set<String>?, onProgress: (Int, Int) -> Unit = { _, _ -> }): RestoreResult = withContext(Dispatchers.IO) {
         val allAccounts = configured(includeLegacy = true, verifyIdentity = false)
         val manifestOwner = allAccounts.singleOrNull { it.driveId == backup.accountKey }
-            ?: throw IOException("当前登录账号与该备份索引所在网盘不匹配。请从 YunX 重新导入正确账号。")
+            ?: throw IOException("当前连接中找不到这个备份的索引副本，请确认已导入保存该备份的 YunX 账号。")
         val accounts = configured(includeLegacy = true)
+        require(accounts.none { ":unverified:" in it.identity }) {
+            "无法验证一个或多个网盘账号身份。请确认 YunX 导入的是备份使用的账号，并检查网络连接。"
+        }
         val manifest = CloudRecovery(listOf(manifestOwner.asDrive()), staging).readManifest(manifestOwner.driveId, backup.objectId)
         val decoded = CloudManifest.decodeContents(manifest)
         val selectedPaths = selectedEntries?.mapNotNull { selected -> decoded.entries.firstOrNull { it.path == selected }?.path }?.toSet()
@@ -264,18 +269,16 @@ class CloudBackupRepository(context: Context) {
     data class BackupContents(val archives: List<CloudArchive>, val entries: List<CloudManifest.BackupEntry>, val missingAccounts: Set<String>)
 
     suspend fun backupContents(backup: RemoteBackup): BackupContents = withContext(Dispatchers.IO) {
-        val accounts = configured(includeLegacy = true)
+        // Reading a selected index must be cheap and must not validate every account again.
+        val accounts = configured(includeLegacy = true, verifyIdentity = false)
         val owner = accounts.singleOrNull { it.driveId == backup.accountKey }
             ?: throw IOException("Backup index account is not connected")
         val contents = CloudManifest.decodeContents(CloudRecovery(listOf(owner.asDrive()), staging).readManifest(owner.driveId, backup.objectId))
-        val verifiedAccounts = accounts.filter { !it.identity.contains(":unverified:") }
-        val connected = verifiedAccounts.map { it.identity }.toSet()
-        val missingIdentities = contents.archives.map { it.accountIdentity }.toSet() - connected
-        val wrongAccountPlatforms = missingIdentities.map { it.substringBefore(':') }.filter { provider ->
-            verifiedAccounts.any { it.account.platform == provider }
-        }.toSet()
-        val missing = missingIdentities.filter { it.substringBefore(':') !in wrongAccountPlatforms }.toSet()
-        BackupContents(contents.archives, contents.entries, missing + wrongAccountPlatforms.map { "$it:wrong-account" })
+        // At preview time these are required identities, not proof that a local account is
+        // wrong. Actual account verification is deferred until the user starts a restore.
+        val connected = accounts.map { it.key }.toSet()
+        val missing = contents.archives.map { it.accountIdentity }.toSet() - connected
+        BackupContents(contents.archives, contents.entries, missing)
     }
 
     suspend fun contents(backup: RemoteBackup): CloudManifest.Contents = backupContents(backup).let {

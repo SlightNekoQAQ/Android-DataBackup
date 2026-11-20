@@ -131,32 +131,46 @@ fun PageRestore() {
                 var missing by remember { mutableStateOf<List<String>>(emptyList()) }
                 var busy by remember { mutableStateOf(false) }
                 var error by remember { mutableStateOf<String?>(null) }
+                var busyLabel by remember { mutableStateOf("正在读取备份列表…") }
+                var showAllBackups by remember { mutableStateOf(false) }
+                var showAllEntries by remember { mutableStateOf(false) }
                 val context = LocalContext.current.applicationContext
                 val cloudRepo = remember(context) { com.xayah.core.data.cloudpool.CloudBackupRepository(context) }
                 val scope = rememberCoroutineScope()
                 LaunchedEffect(Unit) {
                     busy = true
+                    busyLabel = "正在读取备份列表…"
                     scope.launch {
-                        runCatching { cloudRepo.discoverBackups() }
-                            .onSuccess { backups = it }
-                            .onFailure { error = it.message ?: "读取网盘备份失败" }
-                        busy = false
+                        try {
+                            backups = cloudRepo.discoverBackups()
+                            error = null
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            error = failure.message ?: "读取网盘备份失败"
+                        } finally {
+                            busy = false
+                        }
                     }
                 }
-                if (busy) Clickable(readOnly = true, title = "正在读取网盘备份…")
+                if (busy) Clickable(readOnly = true, title = busyLabel)
                 error?.let { Clickable(readOnly = true, title = it) }
-                backups.forEach { backup ->
+                val shownBackups = if (showAllBackups) backups else backups.take(30)
+                shownBackups.forEach { backup ->
                     val dateLabel = if (backup.createdAtMillis > 0) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(backup.createdAtMillis)) else "时间未知"
                     Clickable(title = dateLabel, value = backup.provider, enabled = !busy) {
                         scope.launch {
                             busy = true
+                            busyLabel = "正在读取备份目录…"
                             selected = backup
+                            entries = emptyList()
                             try {
                                 val content = cloudRepo.backupContents(backup)
-                                entries = content.entries
-                                unavailableAccounts = content.missingAccounts.filterNot { it.endsWith(":wrong-account") }.toSet()
-                                unverifiablePlatforms = content.missingAccounts.filter { it.endsWith(":wrong-account") }.map { it.removeSuffix(":wrong-account") }.toSet()
-                                chosen = content.entries.map { it.path }.toSet()
+                        entries = content.entries
+                        unavailableAccounts = content.missingAccounts
+                        unverifiablePlatforms = emptySet()
+                        chosen = content.entries.map { it.path }.toSet()
+                        showAllEntries = false
                                 missing = emptyList()
                                 error = null
                             } catch (cancelled: kotlinx.coroutines.CancellationException) {
@@ -169,9 +183,13 @@ fun PageRestore() {
                         }
                     }
                 }
+                if (backups.size > shownBackups.size) {
+                    Clickable(title = "显示剩余 ${backups.size - shownBackups.size} 份备份") { showAllBackups = true }
+                }
                 selected?.let { backup ->
                     Text("已选择：${if (backup.createdAtMillis > 0) java.text.DateFormat.getDateTimeInstance().format(java.util.Date(backup.createdAtMillis)) else "时间未知"}")
-                    entries.forEach { entry ->
+                    val shownEntries = if (showAllEntries) entries else entries.take(50)
+                    shownEntries.forEach { entry ->
                         val checked = entry.path in chosen
                         Clickable(title = "${if (entry.kind == "app") "应用" else "文件"} · ${entry.displayName}", value = if (checked) "已选择" else "未选择") {
                             chosen = if (checked) chosen - entry.path else chosen + entry.path
@@ -180,14 +198,19 @@ fun PageRestore() {
                     if (unavailableAccounts.isNotEmpty()) Clickable(readOnly = true, title = "缺少网盘账号：${unavailableAccounts.joinToString()}")
                     if (unverifiablePlatforms.isNotEmpty()) Clickable(readOnly = true, title = "账号身份验证失败的网盘：${unverifiablePlatforms.joinToString()}，请重新从 YunX 导入正确账号")
                     if (missing.isNotEmpty()) Clickable(readOnly = true, title = "未恢复：${missing.joinToString()}")
-                    Clickable(enabled = !busy && chosen.isNotEmpty(), title = if (busy) "正在恢复…" else "恢复所选项目") {
+                    if (entries.size > shownEntries.size) {
+                        Clickable(title = "显示剩余 ${entries.size - shownEntries.size} 个项目") { showAllEntries = true }
+                    }
+                    Clickable(enabled = !busy && chosen.isNotEmpty(), title = if (busy) busyLabel else "下载所选项目以继续恢复") {
                         scope.launch {
                             busy = true
+                            busyLabel = "正在下载所选备份…"
                             try {
                                 val result = cloudRepo.restoreAvailable(backup, chosen)
                                 missing = result.unavailableEntries + result.missing.map { it.relativePath }.distinct()
                                 unverifiablePlatforms = result.unverifiablePlatforms
                                 val selectedFolder = cloudRepo.selectedRestoreFolder(result.folder, entries, chosen)
+                                busyLabel = "正在索引下载内容…"
                                 val targets = viewModel.indexCloudSnapshot(selectedFolder)
                                 val selectedTargets = entries.filter { it.path in chosen }.map { if (it.kind == "app") Target.Apps else Target.Files }.distinct()
                                 selectedTargets.filter { it in targets }.forEach { target ->
