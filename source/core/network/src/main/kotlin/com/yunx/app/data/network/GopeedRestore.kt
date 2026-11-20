@@ -93,7 +93,7 @@ class GopeedRestore(context: Context) {
         private val sequence = AtomicLong()
         private data class TaskError(val task: String, val httpStatus: Int?)
         private val lastTaskError = AtomicReference<TaskError?>(null)
-        private val statusPattern = Regex("(?i)(?:status(?: code)?|http)[: =]+([45][0-9]{2})\\b")
+        private val statusPattern = Regex("(?i)(?:http request fail, code|status(?: code)?|http)[: =]+([45][0-9]{2})\\b")
         private var running = false
 
         @Synchronized

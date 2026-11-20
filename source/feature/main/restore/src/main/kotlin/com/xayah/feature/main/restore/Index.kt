@@ -129,6 +129,8 @@ fun PageRestore() {
                 var unverifiablePlatforms by remember { mutableStateOf<Set<String>>(emptySet()) }
                 var chosen by remember { mutableStateOf<Set<String>>(emptySet()) }
                 var missing by remember { mutableStateOf<List<String>>(emptyList()) }
+                var readyFolder by remember { mutableStateOf<String?>(null) }
+                var readyTargets by remember { mutableStateOf<List<Target>>(emptyList()) }
                 var busy by remember { mutableStateOf(false) }
                 var error by remember { mutableStateOf<String?>(null) }
                 var busyLabel by remember { mutableStateOf("正在读取备份列表…") }
@@ -163,6 +165,8 @@ fun PageRestore() {
                             busy = true
                             busyLabel = "正在读取备份目录…"
                             selected = backup
+                            readyFolder = null
+                            readyTargets = emptyList()
                             entries = emptyList()
                             try {
                                 val content = cloudRepo.backupContents(backup)
@@ -191,8 +195,10 @@ fun PageRestore() {
                     val shownEntries = if (showAllEntries) entries else entries.take(50)
                     shownEntries.forEach { entry ->
                         val checked = entry.path in chosen
-                        Clickable(title = "${if (entry.kind == "app") "应用" else "文件"} · ${entry.displayName}", value = if (checked) "已选择" else "未选择") {
+                        Clickable(title = "${if (entry.kind == "app") "应用" else "文件"} · ${entry.displayName}", value = if (checked) "已选择" else "未选择", enabled = !busy) {
                             chosen = if (checked) chosen - entry.path else chosen + entry.path
+                            readyFolder = null
+                            readyTargets = emptyList()
                         }
                     }
                     if (unavailableAccounts.isNotEmpty()) Clickable(readOnly = true, title = "缺少网盘账号：${unavailableAccounts.joinToString()}")
@@ -201,10 +207,19 @@ fun PageRestore() {
                     if (entries.size > shownEntries.size) {
                         Clickable(title = "显示剩余 ${entries.size - shownEntries.size} 个项目") { showAllEntries = true }
                     }
+                    readyFolder?.let { folder ->
+                        readyTargets.forEach { target ->
+                            Clickable(enabled = !busy, title = if (target == Target.Apps) "继续恢复可用应用" else "继续恢复可用文件") {
+                                navController.navigateSingle(MainRoutes.List.getRoute(target, OpType.RESTORE, backupDir = folder.encodeURL()))
+                            }
+                        }
+                    }
                     Clickable(enabled = !busy && chosen.isNotEmpty(), title = if (busy) busyLabel else "下载所选项目以继续恢复") {
                         scope.launch {
                             busy = true
                             busyLabel = "正在下载所选备份…"
+                            readyFolder = null
+                            readyTargets = emptyList()
                             try {
                                 val result = cloudRepo.restoreAvailable(backup, chosen)
                                 missing = result.unavailableEntries + result.missing.map { it.relativePath }.distinct()
@@ -213,9 +228,8 @@ fun PageRestore() {
                                 busyLabel = "正在索引下载内容…"
                                 val targets = viewModel.indexCloudSnapshot(selectedFolder)
                                 val selectedTargets = entries.filter { it.path in chosen }.map { if (it.kind == "app") Target.Apps else Target.Files }.distinct()
-                                selectedTargets.filter { it in targets }.forEach { target ->
-                                    navController.navigateSingle(MainRoutes.List.getRoute(target, OpType.RESTORE, backupDir = selectedFolder.canonicalPath.encodeURL()))
-                                }
+                                readyFolder = selectedFolder.absolutePath
+                                readyTargets = selectedTargets.filter { it in targets }
                                 error = null
                             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                                 throw cancelled
