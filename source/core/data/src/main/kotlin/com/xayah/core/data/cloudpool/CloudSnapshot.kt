@@ -25,7 +25,8 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
 
     inner class Writer internal constructor(private val targets: List<CloudTarget>, private val manual: Boolean) {
         private val createdAtMillis = System.currentTimeMillis()
-        private val id = "$createdAtMillis-${UUID.randomUUID()}"
+        private val sessionId = "$createdAtMillis-${UUID.randomUUID()}"
+        private val id get() = sessionId
         private val transfer = CloudTransfer(drives)
         private val entries = mutableListOf<CloudArchive>()
         private suspend fun identity(accountId: String): String {
@@ -119,7 +120,7 @@ class CloudSnapshot(private val drives: List<CloudDrive>, private val privateSta
             val unavailable = java.util.Collections.synchronizedList(mutableListOf<CloudArchive>())
             coroutineScope {
                 archives.map { archive ->
-                    async {
+                    async(Dispatchers.IO) {
                         slots.withPermit {
                             try {
                                 transfer.retrieve(archive, staging)

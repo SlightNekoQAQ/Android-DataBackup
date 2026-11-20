@@ -221,28 +221,29 @@ class CloudBackupRepository(context: Context) {
         val allAccounts = configured(includeLegacy = true, verifyIdentity = false)
         val manifestOwner = allAccounts.singleOrNull { it.driveId == backup.accountKey }
             ?: throw IOException("当前连接中找不到这个备份的索引副本，请确认已导入保存该备份的 YunX 账号。")
-        val accounts = configured(includeLegacy = true)
-        require(accounts.none { ":unverified:" in it.identity }) {
-            "无法验证一个或多个网盘账号身份。请确认 YunX 导入的是备份使用的账号，并检查网络连接。"
-        }
         val manifest = CloudRecovery(listOf(manifestOwner.asDrive()), staging).readManifest(manifestOwner.driveId, backup.objectId)
         val decoded = CloudManifest.decodeContents(manifest)
+        val requiredProviders = decoded.archives.map { it.accountIdentity.substringBefore(':') }.toSet()
+        val accounts = configured(includeLegacy = true).filter { it.account.platform in requiredProviders }
+        require(accounts.none { ":unverified:" in it.identity }) {
+            "无法验证备份所需的网盘账号。请检查网络，并从 YunX 重新导入这些账号。"
+        }
         val selectedPaths = selectedEntries?.mapNotNull { selected -> decoded.entries.firstOrNull { it.path == selected }?.path }?.toSet()
         require(selectedEntries == null || selectedPaths == selectedEntries) { "Selected backup entry is not present in the index" }
         val selectedItemPaths = selectedPaths?.map { it.trimEnd('/') + "/" }
         val relevantArchives = if (selectedItemPaths == null) decoded.archives else decoded.archives.filter { archive ->
             selectedItemPaths.any { archive.relativePath.startsWith(it) }
         }
+        val requiredIdentities = relevantArchives.map { it.accountIdentity }.toSet()
         val byIdentity = accounts.associateBy { it.identity }
-        val availableByIdentity = byIdentity.filterValues { !it.identity.contains(":unverified:") }
+        val availableByIdentity = byIdentity.filterValues { !it.identity.contains(":unverified:") && it.key in requiredIdentities }
         val missing = relevantArchives.filter { it.accountIdentity !in availableByIdentity }
-        val wrongAccounts = accounts.filter { it.identity.contains(":unverified:") }.map { it.account.platform }.toSet()
+        val wrongAccounts = accounts.filter { it.identity.contains(":unverified:") && it.account.platform in relevantArchives.map { a -> a.accountIdentity.substringBefore(':') }.toSet() }.map { it.account.platform }.toSet()
         val accessibleArchives = relevantArchives.filter { it.accountIdentity in availableByIdentity }
         val accessibleDrives = accessibleArchives.map { archive ->
             availableByIdentity.getValue(archive.accountIdentity).asDrive()
         }.distinctBy { it.accountId }
-        // The manifest identifies accounts by stable provider identity. Translate to this
-        // device's current provider folder handles for actual object downloads.
+        // Translate stable cloud account identity to this device's provider folder routing ID.
         val routedArchives = accessibleArchives.map { archive ->
             archive.copy(accountId = availableByIdentity.getValue(archive.accountIdentity).driveId)
         }
